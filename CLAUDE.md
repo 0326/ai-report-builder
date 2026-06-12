@@ -1,0 +1,95 @@
+# ai-report-builder — Claude Code 工作指引
+
+AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现。完整技术方案见 `docs/AI-Native智能报告搭建-搭建态与运行态技术方案.md`，**实现任何一轮前先读对应章节**。所有外部依赖（Agent / DAF 查询 / 沙箱构建）一律 mock。
+
+## 当前进度
+
+- [x] **第 1 轮**：`@daf/report-runtime`（内核 + P0 模块 + 渲染器）、`@daf-materials/kit`（antd + VChart/VTable 首批物料）。26 个单测通过。
+- [ ] **第 2 轮**：template-report + report-scripts + mock-server → 浏览器可打开预览页
+- [ ] **第 3 轮**：host 工作台 + Bridge + 可视编排 + schema 直更新
+- [ ] **第 4 轮**：标注选区 + 布局拖拽 + 物料拖入 + 双 diff
+- [ ] **第 5 轮**：mock Agent 对话 + 真 esbuild 沙箱构建 + 时间线撤销
+
+每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
+
+## 已确认的实现决策（不要改）
+
+1. 沙箱构建用**真 esbuild**：mock-server 真改 template-report 源码、真增量构建出新 bundle（hash 寻址），不是假延时切 URL。
+2. 标注定位第一版**只做块级** `data-node-id`，源码级 `data-loc`（babel 注入）5 轮之后再说。
+3. 物料独立成包 `@daf-materials/kit`，模拟"CDN 共享依赖、不打进报告 bundle"语义。
+4. 技术栈：React 18 + TS strict + Vite；host 用 antd 5；图表 @visactor/vchart、表格 @visactor/vtable；mock-server 用 node:http **零依赖**。
+
+## 架构铁律（来自方案，违反即返工）
+
+- `report.schema.json` 是结构半权威层：块边界/数据源/联动/筛选必须声明，块内部代码自由。平台语义全部 `x-` 前缀，文件是合法 LCE 页面 schema。
+- 双管线分流：声明性修改（props/x-position/物料拖入/声明式联动）**只改 schema、零构建、≤2s**；代码性修改才走 esbuild 构建管线（10s 级）。产物 = bundle.js 与 schema.json 分离部署，schema 运行时 fetch。
+- AI 生成代码的唯一世界接口是 `runtime`（block-runtime facade）：取数 `runtime.data.query(dsId)` 仅允许 x-consumes 声明的 dsId；事件 `runtime.event.emit` 仅允许 x-emits 声明集。禁止裸 fetch（lint + 运行期双重拒绝）。
+- Agent 修改约定"先 schema 后代码"；一轮修改 = 一个 git commit；撤销 = revert + 按 commit hash 秒级切产物 URL。
+- Runtime 内核 < 500 行红线，能力全部模块化（kernel.use）。
+
+## 代码约定
+
+- ESM only，`"type": "module"`；包入口直接指 `src/index.ts`（Vite/esbuild 直接消费 TS 源码，不预构建）。
+- **相对导入必须带 `.ts`/`.tsx` 扩展名**（Node 22 type-stripping 直跑测试依赖这一点；tsconfig 已开 `allowImportingTsExtensions`）。
+- 不用 enum/namespace（Node type-stripping 不支持）。
+- 纯逻辑（无 React）放 `.ts` 并从 `@daf/report-runtime/core` 导出，保证 node:test 零依赖可跑；React 代码放 `.tsx`。
+- 测试用 node:test + node:assert，直跑 TS：`pnpm test`。需要 Node ≥ 22.18、pnpm ≥ 9。
+- commit message 结构化：`round(N): <intent> | packages: <触及包> | type: <feat|fix|schema|code>`。
+
+## 目录与各包职责
+
+```
+packages/report-runtime   内核(kernel.ts) + P0模块(modules/) + 渲染器(renderer/)  [已完成]
+packages/materials        @daf-materials/kit 物料 + meta.ts(componentMeta+x-ai)   [已完成]
+packages/report-scripts   esbuild 构建 / 声明一致性 lint / manifest 派生          [第2轮]
+packages/designtime-sdk   选区 overlay / 块级定位 / Bridge JSON-RPC               [第3-4轮]
+packages/mock-server      DAF查询 mock / Agent剧本 / 沙箱构建 / 产物静态服务      [第2轮起]
+apps/template-report      示例报告工程: report.schema.json + src/blocks           [第2轮]
+apps/host                 搭建工作台: 对话/画布/可视编排/物料/双diff              [第3轮起]
+```
+
+第 1 轮已交付的关键 API（后续轮直接消费，勿重复造）：
+`createReportRuntime(opts)`、`kernel.get<DataRuntime>('data')`、`ReportRenderer({runtime, registry, bundle})`、`buildRegistry(componentsMap, {'@daf-materials/kit': kitExports})`、`makeBlockRuntime`、`materialMetas`。测试 fixture 见 `packages/report-runtime/test/fixtures.ts`（与方案 §2.2 示例 schema 对齐）。
+
+## 各轮实现要点与验收
+
+### 第 2 轮：可运行预览（方案 §2.1/§2.3/§4.1）
+
+- `apps/template-report`：`report.schema.json`（周报示例：KPICard×3 + AIBlock 趋势块 + PieChart 渠道占比 + DataTable 明细 + f_region 筛选 + lk1 联动，直接基于 test/fixtures.ts 扩充）+ `src/blocks/TrendBlock/index.tsx`（自定义块，用 runtime.data 取数、LineChart 渲染、emit drill）+ `src/data/` 纯函数。
+- `packages/report-scripts`：`build.ts`（esbuild：entry 注入标准模板，react/物料/runtime 外置为共享依赖，产出 `dist/bundle.{hash}.js` + `schema.{hash}.json` + `manifest.json`）、`lint.ts`（AST 或正则级别即可：裸 fetch/XHR 黑名单、runtime.data.query 的 dsId ∈ x-consumes、emit ∈ x-emits）、`manifest.ts`（从 schema 派生 inputs/outputs/dataSources/permissions）。
+- `packages/mock-server`（node:http 零依赖）：
+  - `POST /api/daf/query` → 按 datasetId 返回 fixtures 数据集（metric_dau/metric_channel/metric_detail，支持 region 参数过滤，模拟 100-300ms 延迟）
+  - `GET /preview/` 预览 HTML（importmap 把 react/物料/runtime 指向 Vite dev 或预构建产物）+ `GET /artifacts/*` 产物静态服务
+- 验收：`pnpm dev` 起 mock-server + 预览，浏览器打开能看到周报，切区域筛选图表联动刷新；`pnpm test`、`pnpm lint:report`、`pnpm build:report` 全绿。
+
+### 第 3 轮：host 工作台 + schema 直更新（方案 §3.1/§3.3）
+
+- `packages/designtime-sdk`：Bridge = postMessage JSON-RPC（握手带版本 + token），方法对齐方案 §3.3 表：`designtime.enable/highlight/getSchema/getSelection`、`designtime.onSelect`、`runtime.action`、`theme.sync`。
+- `apps/host`（Vite + React + antd）：三栏 = 对话占位 / 预览 iframe / 可视编排面板（结构树、数据源视图、联动图三个 tab，全部是 schema 的投影）。
+- schema 直更新管线：host 改 schema → `PUT /api/schema` → mock-server 写盘存新版本 → 通知 iframe（Bridge `schema.reload`）→ runtime 重建并重渲染。属性面板用 materialMetas.configurableProps 生成表单。
+- 验收：结构树点选块、属性面板改 donut/标题 → 预览 ≤2s 更新，无构建发生。
+
+### 第 4 轮：标注 + 拖拽 + 双 diff（方案 §3.2/§3.4 链路二三）
+
+- designtime-sdk 标注模式：overlay 层（不侵入业务 DOM）悬浮高亮 + 点选命中 `data-node-id` → 组装选区上下文包（schemaSlice + runtimeState 数据样本）→ Bridge 上报 host 显示。
+- 布局拖拽：overlay 上拖块改 x-position（12 列栅格吸附），确定性回写 schema 走直更新管线。
+- 物料拖入：host 物料面板（materialMetas 渲染）拖到画布 → componentsMap 增引用 + children 插标准节点（defaultProps + defaultSize + 数据绑定向导选 dsId）→ schema 直更新。
+- 双 diff：schema diff（自实现 JSON 对比或 jsondiffpatch）+ 代码 diff（按文件折叠），确认后才提交；破坏性变更（删块/删数据源）红色警示。
+- 验收：点选饼图出上下文、拖块换位即时生效、拖入 DataTable 绑定 ds 后渲染、每次修改先出 diff 确认。
+
+### 第 5 轮：mock Agent + 构建管线 + 撤销（方案 §3.4 链路一/§3.5）
+
+- Agent 剧本（`mock-server/fixtures/agent-scripts/`）：意图关键词匹配 → 固定响应。至少三个剧本：① "做周报…" → 全量 schema + TrendBlock 代码 → 走构建；② 选区+"改成环形图，点击渠道联动趋势" → 纯 schema patch（对齐方案附录 A 的 diff）→ 直更新；③ "加一个留存漏斗块" → schema + 新块代码 → 增量构建。响应含结构化过程卡（数据集/物料选用理由/变更摘要）。
+- 沙箱构建 mock：`POST /api/sandbox/build` → 真改 template-report 源码 → 调 report-scripts lint+esbuild → 新 hash 产物 → 返回新 URL，host 切 iframe。失败回喂剧本自修复（≤2 次）。
+- 每轮修改 git commit（用 isomorphic-git 或直接 child_process git）；时间线 UI：每轮 intent/diff 摘要，点任意节点回滚 = 切该 commit 产物 URL。
+- 验收：端到端演示完整跑通——对话生成 → 标注修改 → 拖拽 → 双 diff → 撤销回滚。
+
+## 命令
+
+```bash
+pnpm install
+pnpm test            # runtime 纯逻辑单测（零依赖直跑）
+pnpm dev             # 第2轮起：mock-server + 预览/host（concurrently 或 node 脚本）
+pnpm lint:report     # 第2轮起：对 template-report 跑声明一致性 lint
+pnpm build:report    # 第2轮起：esbuild 构建产物
+```

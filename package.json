@@ -1,0 +1,17 @@
+{
+  "name": "ai-report-builder",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"packages/report-runtime/test/*.test.ts\"",
+    "dev": "echo '第2轮后可用: pnpm dev 启动 mock-server + host'",
+    "build:report": "pnpm --filter template-report build"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
