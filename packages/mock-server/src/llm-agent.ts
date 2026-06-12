@@ -311,9 +311,22 @@ export function resetSession(sessionId: string): void {
   sessions.delete(sessionId);
 }
 
-function selectionText(sel: SelectionCtx | null | undefined): string {
+interface ElementSel {
+  selector?: string;
+  tag?: string;
+  text?: string;
+  region?: string;
+}
+
+function selectionText(sel: (SelectionCtx & { element?: ElementSel; level?: string }) | null | undefined): string {
   if (!sel?.nodeId) return '';
-  return `\n\n【选区上下文】用户在预览中选中了节点 ${sel.nodeId}（${sel.componentName ?? '?'}）：\n${JSON.stringify((sel as { schemaSlice?: unknown }).schemaSlice ?? sel, null, 1)}`;
+  let out = `\n\n【选区上下文】用户在预览中选中了节点 ${sel.nodeId}（${sel.componentName ?? '?'}）`;
+  if (sel.level === 'element' && sel.element) {
+    const e = sel.element;
+    out += `，且精确标注了块内元素：<${e.tag ?? '?'}>${e.text ? ` 文本="${e.text}"` : ''}${e.region ? `，位于块内 ${e.region} 区域` : ''}${e.selector ? `，路径 ${e.selector}` : ''}。修改应聚焦该元素对应的 props/字段/代码片段，而非整块重写`;
+  }
+  out += `：\n${JSON.stringify((sel as { schemaSlice?: unknown }).schemaSlice ?? sel, null, 1)}`;
+  return out;
 }
 
 /** 把 assistant content 转回 API 回传格式（thinking 签名原样保留）。 */

@@ -7,6 +7,7 @@ import {
 } from '@ant-design/icons';
 import type { CSSProperties } from 'react';
 import type { RoundResult, DiffLine } from './sse.ts';
+import { Markdown } from './markdown.tsx';
 
 export interface ToolStep {
   name: string;
@@ -115,7 +116,7 @@ export function AssistantContent({ view }: { view: TurnView }) {
           <ThoughtChain size="small" items={stepItems(view.steps)} />
         </div>
       )}
-      {view.text && <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{view.text}</div>}
+      {view.text && <Markdown text={view.text} />}
       {view.running && !view.text && view.steps.length === 0 && !view.thinking && (
         <span style={{ color: '#8f959e', fontSize: 13 }}>规划中…</span>
       )}

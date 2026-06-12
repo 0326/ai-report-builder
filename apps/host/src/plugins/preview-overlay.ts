@@ -96,6 +96,7 @@ function PreviewSwitch({ ctx }: { ctx: IPublicModelPluginContext }) {
           /* 面板未注册时忽略 */
         }
       },
+      onMode: (m) => syncAnnotate(m === 'annotate'),
     });
     handleRef.current = handle;
     void handle.whenReady.then(() => {
@@ -112,7 +113,7 @@ function PreviewSwitch({ ctx }: { ctx: IPublicModelPluginContext }) {
     syncAnnotate(annotate);
     if (annotate) {
       void handleRef.current?.enable('annotate');
-      Message.show({ type: 'notice', content: '标注模式：在预览中点选要修改的块' });
+      Message.show({ type: 'notice', content: '标注：点选元素精确标注 · ⌥点击选整块 · Esc 退出' });
     }
   }
 

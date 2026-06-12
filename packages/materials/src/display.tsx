@@ -44,3 +44,24 @@ export function TextBlock({ content = '', align = 'left', fontSize = 14 }: TextB
     </div>
   );
 }
+
+export interface SectionTitleProps {
+  title?: string;
+  subtitle?: string;
+  divider?: boolean;
+  onEmit?: (event: string, payload?: unknown) => void;
+}
+
+/** 区块标题：报告分节（标题 + 副标题 + 可选分隔线） */
+export function SectionTitle({ title = '区块标题', subtitle, divider = true }: SectionTitleProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', padding: '0 4px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <span style={{ width: 4, alignSelf: 'stretch', borderRadius: 2, background: 'linear-gradient(180deg,#3370ff,#7aa5ff)' }} />
+        <span style={{ fontSize: 16, fontWeight: 600, color: '#1f2329' }}>{title}</span>
+        {subtitle && <span style={{ fontSize: 12, color: '#8f959e' }}>{subtitle}</span>}
+      </div>
+      {divider && <div style={{ marginTop: 8, borderBottom: '1px solid #eceef1' }} />}
+    </div>
+  );
+}

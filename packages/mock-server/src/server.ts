@@ -25,7 +25,7 @@ import { Sandbox } from './sandbox.ts';
 import { seedFiles } from './agent-scripts.ts';
 import { runAgentTurn } from './agent.ts';
 import { runLlmTurn, resetSession, type AgentEvent } from './llm-agent.ts';
-import { getLlmConfig } from './env.ts';
+import { getLlmConfig, saveLlmRuntimeConfig, resetLlmConfigCache } from './env.ts';
 import type { ReportSchema } from '@daf/report-runtime/core';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -278,6 +278,45 @@ async function handleCheckout(req: import('node:http').IncomingMessage, res: imp
   }
 }
 
+/**
+ * 测试 LLM 连接（零成本）：GET {baseUrl}/v1/models/{model} —— 同时验证凭证与模型 id。
+ * body 可带临时配置（未保存的表单值），缺省用当前生效配置。
+ */
+async function handleLlmTest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+  let body: { model?: string; apiKey?: string; authToken?: string; baseUrl?: string };
+  try {
+    body = (await readJson(req)) ?? {};
+  } catch {
+    return sendJson(res, 400, { error: 'invalid json' });
+  }
+  const cur = getLlmConfig();
+  const model = body.model || cur.model;
+  const baseUrl = (body.baseUrl || cur.baseUrl).replace(/\/$/, '');
+  const apiKey = body.apiKey || cur.apiKey;
+  const authToken = body.authToken || cur.authToken;
+  if (!apiKey && !authToken) return sendJson(res, 200, { ok: false, error: '未配置 API Key / Token' });
+
+  const headers: Record<string, string> = { 'anthropic-version': '2023-06-01' };
+  if (authToken) {
+    headers['authorization'] = `Bearer ${authToken}`;
+    headers['anthropic-beta'] = 'oauth-2025-04-20';
+  } else if (apiKey) {
+    headers['x-api-key'] = apiKey;
+  }
+  try {
+    const r = await fetch(`${baseUrl}/v1/models/${encodeURIComponent(model)}`, { headers, signal: AbortSignal.timeout(10000) });
+    if (r.ok) {
+      const info = (await r.json()) as { display_name?: string };
+      return sendJson(res, 200, { ok: true, model, displayName: info.display_name ?? model });
+    }
+    const text = await r.text().catch(() => '');
+    const hint = r.status === 401 ? '凭证无效' : r.status === 404 ? `模型 id 不存在: ${model}` : `HTTP ${r.status}`;
+    return sendJson(res, 200, { ok: false, error: `${hint}${text ? ` · ${text.slice(0, 160)}` : ''}` });
+  } catch (e) {
+    return sendJson(res, 200, { ok: false, error: `连接失败: ${(e as Error).message}` });
+  }
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const path = url.pathname;
@@ -291,6 +330,29 @@ const server = createServer((req, res) => {
     const cfg = getLlmConfig();
     return sendJson(res, 200, { llm: cfg.enabled, model: cfg.enabled ? cfg.model : null });
   }
+  if (m === 'GET' && path === '/api/agent/llm-config') {
+    const cfg = getLlmConfig();
+    return sendJson(res, 200, {
+      model: cfg.model,
+      baseUrl: cfg.baseUrl,
+      hasKey: Boolean(cfg.apiKey),
+      hasToken: Boolean(cfg.authToken),
+      enabled: cfg.enabled,
+      source: cfg.source,
+    });
+  }
+  if (m === 'PUT' && path === '/api/agent/llm-config') {
+    return void readJson<{ model?: string; apiKey?: string; authToken?: string; baseUrl?: string }>(req)
+      .then((b) => {
+        saveLlmRuntimeConfig(b ?? {});
+        resetLlmConfigCache();
+        const cfg = getLlmConfig();
+        console.log(`  ⚙ LLM 配置已更新：${cfg.enabled ? cfg.model : '未配置凭证（剧本模式）'}`);
+        sendJson(res, 200, { ok: true, enabled: cfg.enabled, model: cfg.model });
+      })
+      .catch(() => sendJson(res, 400, { error: 'invalid json' }));
+  }
+  if (m === 'POST' && path === '/api/agent/llm-test') return void handleLlmTest(req, res);
   if (m === 'POST' && path === '/api/agent/reset') {
     return void readJson<{ sessionId?: string }>(req)
       .then((b) => {

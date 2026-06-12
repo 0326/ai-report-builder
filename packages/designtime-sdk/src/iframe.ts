@@ -8,8 +8,8 @@ import type { DataRuntime, StateRuntime } from '@daf/report-runtime/core';
 import { Bridge, windowEndpoint } from './bridge.ts';
 import {
   BRIDGE_VERSION, M_ENABLE, M_HIGHLIGHT, M_GET_SCHEMA, M_GET_SELECTION,
-  M_RUNTIME_ACTION, M_THEME_SYNC, M_SCHEMA_RELOAD, M_ON_SELECT,
-  type DesigntimeMode, type SelectionCtx,
+  M_RUNTIME_ACTION, M_THEME_SYNC, M_SCHEMA_RELOAD, M_ON_SELECT, M_ON_MODE,
+  type DesigntimeMode, type SelectionCtx, type ElementCtx,
 } from './protocol.ts';
 
 export interface InstallOptions {
@@ -31,12 +31,7 @@ function makeOverlay(color: string, bg: string): HTMLDivElement {
   return el;
 }
 
-function coverNode(overlay: HTMLDivElement, nodeId: string | null): void {
-  if (!nodeId) {
-    overlay.style.display = 'none';
-    return;
-  }
-  const target = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+function coverEl(overlay: HTMLDivElement, target: Element | null): void {
   if (!target) {
     overlay.style.display = 'none';
     return;
@@ -49,6 +44,58 @@ function coverNode(overlay: HTMLDivElement, nodeId: string | null): void {
     width: `${r.width + 4}px`,
     height: `${r.height + 4}px`,
   });
+}
+
+function coverNode(overlay: HTMLDivElement, nodeId: string | null): void {
+  coverEl(overlay, nodeId ? document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`) : null);
+}
+
+/* ---------------- 细粒度元素定位（块内 CSS 路径 + 语义信息） ---------------- */
+
+function cssStep(el: Element): string {
+  const tag = el.tagName.toLowerCase();
+  const cls = [...el.classList].filter((c) => !c.startsWith('lc-') && c.length < 32).slice(0, 2);
+  let step = tag + cls.map((c) => `.${c}`).join('');
+  const parent = el.parentElement;
+  if (parent) {
+    const siblings = [...parent.children].filter((s) => s.tagName === el.tagName);
+    if (siblings.length > 1) step += `:nth-of-type(${siblings.indexOf(el) + 1})`;
+  }
+  return step;
+}
+
+/** 相对块根的 CSS 路径（最多 4 级，足够 Agent 定位语义区域）。 */
+function selectorWithin(blockRoot: Element, el: Element): string {
+  const steps: string[] = [];
+  let cur: Element | null = el;
+  while (cur && cur !== blockRoot && steps.length < 4) {
+    steps.unshift(cssStep(cur));
+    cur = cur.parentElement;
+  }
+  return steps.join(' > ');
+}
+
+/** 元素在块内的九宫格区域（top-left … bottom-right），辅助模型语义定位。 */
+function regionOf(blockRoot: Element, el: Element): string {
+  const b = blockRoot.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  if (b.width === 0 || b.height === 0) return 'center';
+  const cx = (r.left + r.width / 2 - b.left) / b.width;
+  const cy = (r.top + r.height / 2 - b.top) / b.height;
+  const col = cx < 0.34 ? 'left' : cx > 0.66 ? 'right' : 'center';
+  const row = cy < 0.34 ? 'top' : cy > 0.66 ? 'bottom' : 'middle';
+  return row === 'middle' && col === 'center' ? 'center' : `${row}-${col}`;
+}
+
+function elementCtx(blockRoot: Element, el: Element): ElementCtx {
+  const text = (el.textContent ?? '').trim().replace(/\s+/g, ' ');
+  return {
+    selector: selectorWithin(blockRoot, el),
+    tag: el.tagName.toLowerCase(),
+    ...(text ? { text: text.slice(0, 60) } : {}),
+    classes: [...el.classList].slice(0, 4),
+    region: regionOf(blockRoot, el),
+  };
 }
 
 /** 在预览页安装搭建态 SDK；非 designtime 模式返回 null（什么都不做）。 */
@@ -67,7 +114,10 @@ export function installDesigntimeSDK(opts: InstallOptions): Bridge | null {
 
   bridge.handle(M_ENABLE, (params) => {
     mode = ((params as { mode?: DesigntimeMode })?.mode) ?? 'browse';
-    if (mode === 'browse') coverNode(hoverLayer, null);
+    if (mode === 'browse') {
+      coverEl(hoverLayer, null);
+      coverEl(blockHintLayer, null);
+    }
     return { mode };
   });
 
@@ -115,25 +165,60 @@ export function installDesigntimeSDK(opts: InstallOptions): Bridge | null {
     return { ok: true };
   });
 
-  // 标注模式：hover 高亮 + 点选命中块级 data-node-id → 上报选区
-  const nodeIdAt = (e: MouseEvent): string | null =>
-    (e.target as Element | null)?.closest?.('[data-node-id]')?.getAttribute('data-node-id') ?? null;
+  // 标注模式（细粒度）：hover 同时高亮 块（虚线提示）+ 块内最深元素（实线）；
+  // 点击 = 元素级选区（含 selector/text/region），⌥Alt+点击 = 整块选区；Esc 退出标注。
+  const blockHintLayer = makeOverlay('rgba(20,86,240,0.3)', 'transparent');
+  blockHintLayer.style.borderStyle = 'dashed';
+
+  const blockAt = (e: MouseEvent): Element | null =>
+    (e.target as Element | null)?.closest?.('[data-node-id]') ?? null;
+
+  /** 命中的最深有意义元素：从 e.target 起，跳过纯包装（与父节点同尺寸的单子元素）。 */
+  const elementAt = (e: MouseEvent, block: Element): Element => {
+    let el = e.target as Element;
+    if (el.nodeType === Node.TEXT_NODE) el = el.parentElement ?? block;
+    // canvas/svg 内部命中归一到其容器（图表区域）
+    const chartHost = el.closest('canvas, svg');
+    if (chartHost) el = chartHost.parentElement ?? chartHost;
+    return block.contains(el) ? el : block;
+  };
 
   document.addEventListener('mousemove', (e) => {
     if (mode !== 'annotate') return;
-    coverNode(hoverLayer, nodeIdAt(e));
+    const block = blockAt(e);
+    coverEl(blockHintLayer, block);
+    coverEl(hoverLayer, block ? elementAt(e, block) : null);
   }, { passive: true });
 
   document.addEventListener('click', (e) => {
     if (mode !== 'annotate') return;
-    const nodeId = nodeIdAt(e);
-    if (!nodeId) return;
+    const block = blockAt(e);
+    if (!block) return;
     e.preventDefault();
     e.stopPropagation();
-    selection = { level: 'block', nodeId, schemaSlice: findNode(opts.getSchema(), nodeId) };
-    coverNode(highlightLayer, nodeId);
+    const nodeId = block.getAttribute('data-node-id')!;
+    const el = elementAt(e, block);
+    const isBlockLevel = e.altKey || el === block;
+    selection = {
+      level: isBlockLevel ? 'block' : 'element',
+      nodeId,
+      schemaSlice: findNode(opts.getSchema(), nodeId),
+      ...(isBlockLevel ? {} : { element: elementCtx(block, el) }),
+    };
+    coverEl(highlightLayer, isBlockLevel ? block : el);
+    coverEl(blockHintLayer, null);
+    coverEl(hoverLayer, null);
     bridge.notify(M_ON_SELECT, selection);
   }, { capture: true });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && mode === 'annotate') {
+      mode = 'browse';
+      coverEl(hoverLayer, null);
+      coverEl(blockHintLayer, null);
+      bridge.notify(M_ON_MODE, { mode });
+    }
+  });
 
   bridge.announceReady(BRIDGE_VERSION);
   return bridge;

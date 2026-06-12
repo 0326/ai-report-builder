@@ -3,7 +3,7 @@ import type { ReportSchema } from '@daf/report-runtime/core';
 import { Bridge, windowEndpoint } from './bridge.ts';
 import {
   M_ENABLE, M_HIGHLIGHT, M_GET_SCHEMA, M_GET_SELECTION,
-  M_RUNTIME_ACTION, M_THEME_SYNC, M_SCHEMA_RELOAD, M_ON_SELECT,
+  M_RUNTIME_ACTION, M_THEME_SYNC, M_SCHEMA_RELOAD, M_ON_SELECT, M_ON_MODE,
   type DesigntimeMode, type SelectionCtx,
 } from './protocol.ts';
 
@@ -23,6 +23,8 @@ export interface PreviewHandle {
 
 export interface ConnectOptions {
   onSelect?: (ctx: SelectionCtx) => void;
+  /** iframe 侧模式变更（如 Esc 退出标注），宿主同步 UI 状态 */
+  onMode?: (mode: DesigntimeMode) => void;
   onReady?: (info: { version: string }) => void;
 }
 
@@ -31,6 +33,7 @@ export function connectPreview(iframe: HTMLIFrameElement, token: string, opts: C
   if (!peer) throw new Error('[designtime] iframe 尚未挂载（contentWindow 为空）');
   const bridge = new Bridge(windowEndpoint(window, peer), token, { onReady: opts.onReady });
   if (opts.onSelect) bridge.handle(M_ON_SELECT, (params) => opts.onSelect!(params as SelectionCtx));
+  if (opts.onMode) bridge.handle(M_ON_MODE, (params) => opts.onMode!((params as { mode: DesigntimeMode }).mode));
 
   return {
     bridge,

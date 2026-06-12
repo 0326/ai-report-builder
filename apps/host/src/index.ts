@@ -4,6 +4,7 @@
  * mergeXFields 保真；保存走既有零构建直更新管线（PUT /api/schema）。
  */
 import { init, plugins } from '@alilc/lowcode-engine';
+import './theme.css';
 import ComponentsPanePlugin from '@alilc/lowcode-plugin-components-pane';
 import EditorInitPlugin from './plugins/editor-init.ts';
 import DefaultSettersRegistryPlugin from './plugins/setters-registry.ts';
@@ -11,6 +12,7 @@ import SaveAndPreviewPlugin from './plugins/save-and-preview.ts';
 import ChatPanePlugin from './plugins/chat-pane.ts';
 import TimelinePanePlugin from './plugins/timeline-pane.ts';
 import PreviewOverlayPlugin from './plugins/preview-overlay.ts';
+import BrandingPlugin from './plugins/branding.ts';
 
 /** daf-query 数据源 → mock-server DAF 查询（画布内真实数据） */
 function createDafQueryHandler() {
@@ -27,6 +29,7 @@ function createDafQueryHandler() {
 }
 
 async function main() {
+  await plugins.register(BrandingPlugin as never);
   await plugins.register(EditorInitPlugin as never);
   await plugins.register(DefaultSettersRegistryPlugin as never);
   await plugins.register(ComponentsPanePlugin as never);

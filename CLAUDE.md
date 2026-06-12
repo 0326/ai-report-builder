@@ -14,6 +14,8 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 
 - [x] **第 7 轮（用户指令：预览并入设计器）**：host 新增 preview-overlay 插件——顶栏「设计 | 预览」切换，预览 = mainArea 上盖运行态 iframe（切换前静默保存保证画布↔产物一致），画布保持挂载不丢状态；标注在中央预览进行，选区经 Bridge → 宿主 postMessage → 对话 dock 成 chip（ready 握手 + 消息缓冲解决 dock 懒挂载丢消息）。对话面板瘦身为纯 chat（/chat/?embedded=1 嵌入模式），独立 /chat/ 仍保留自带预览的分栏形态。Agent 每轮提交 → 中央预览自动切产物 + 画布重载。
 
+- [x] **第 8 轮（用户指令：平台能力全面增强）**：① **物料库** 6→11：新增 AreaChart/FunnelChart/RadarChart（VChart）、GaugeChart（antd Progress dashboard，VChart gauge spec 不稳弃用）、SectionTitle；物料面板按 category 自动分组；meta↔kitExports 一致性测试。② **细粒度标注**：块内元素级选取（hover 双层高亮：实线元素+虚线所属块；点击=元素级选区含 selector/tag/text/九宫格 region，⌥点击=整块，Esc 退出并回同步状态 M_ON_MODE）；chip 显示「块 › 元素 "文本"」；llm-agent 选区上下文带元素定位并要求聚焦修改。③ **模型配置化**：/api/agent/llm-config GET/PUT（运行时持久化 .artifacts/llm-config.json，优先级高于 env，保存即生效）+ /api/agent/llm-test（GET /v1/models/{id} 零成本验证凭证+模型 id）；chat 设置弹窗（模型 id 自动补全/baseUrl/apiKey/测试连接）——配置 model id 即可真实对话。④ **商业级 UI**：chat 用 X 的 Welcome/Prompts 空态 + marked/DOMPurify markdown 渲染 + 渐变品牌/气泡精修/模型状态 pill；host 品牌顶栏（BrandingPlugin）+ theme.css 主题精修。65 单测通过（+3）。浏览器实测：组件库分组 11 物料、漏斗/雷达/仪表盘真实渲染、元素级 chip「DAU › span "16,240"」、设置弹窗测试连接拿到真实 authentication_error（链路只差有效 key）。
+
 每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
 
 ## 已确认的实现决策（不要改）

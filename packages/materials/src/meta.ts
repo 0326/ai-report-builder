@@ -98,6 +98,66 @@ export const materialMetas: MaterialMeta[] = [
     ],
     'x-ai': { summary: '说明性文字/结论段落', useWhen: '报告结论、注释说明' },
   },
+  {
+    componentName: 'AreaChart', package: PKG, exportName: 'AreaChart',
+    title: '面积图', category: 'chart',
+    defaultProps: { xField: 'date', yField: 'value', stack: false },
+    defaultSize: { w: 8, h: 6 }, dataProp: 'data',
+    configurableProps: [
+      { name: 'xField', title: 'X 字段', type: 'string' },
+      { name: 'yField', title: 'Y 字段', type: 'string' },
+      { name: 'seriesField', title: '分组字段', type: 'string' },
+      { name: 'stack', title: '堆叠', type: 'boolean' },
+    ],
+    'x-ai': { summary: '趋势 + 量级感知（带填充的折线）', useWhen: '累计量、流量规模随时间变化', avoidWhen: '多序列交叉对比（用折线图）' },
+  },
+  {
+    componentName: 'FunnelChart', package: PKG, exportName: 'FunnelChart',
+    title: '漏斗图', category: 'chart',
+    defaultProps: { categoryField: 'stage', valueField: 'value' },
+    defaultSize: { w: 6, h: 6 }, dataProp: 'data',
+    configurableProps: [
+      { name: 'categoryField', title: '环节字段', type: 'string' },
+      { name: 'valueField', title: '数值字段', type: 'string' },
+    ],
+    'x-ai': { summary: '多环节转化/流失展示（含转化率标签）', useWhen: '留存漏斗、转化链路、注册激活付费' },
+  },
+  {
+    componentName: 'RadarChart', package: PKG, exportName: 'RadarChart',
+    title: '雷达图', category: 'chart',
+    defaultProps: { categoryField: 'dimension', valueField: 'value' },
+    defaultSize: { w: 6, h: 6 }, dataProp: 'data',
+    configurableProps: [
+      { name: 'categoryField', title: '维度字段', type: 'string' },
+      { name: 'valueField', title: '数值字段', type: 'string' },
+      { name: 'seriesField', title: '分组字段', type: 'string' },
+    ],
+    'x-ai': { summary: '多维度能力/评分对比', useWhen: '多维评估、画像对比', avoidWhen: '维度少于 3 个' },
+  },
+  {
+    componentName: 'GaugeChart', package: PKG, exportName: 'GaugeChart',
+    title: '仪表盘', category: 'chart',
+    defaultProps: { max: 100 },
+    defaultSize: { w: 4, h: 5 }, dataProp: 'data',
+    configurableProps: [
+      { name: 'field', title: '取值字段', type: 'string' },
+      { name: 'max', title: '最大值', type: 'number' },
+      { name: 'label', title: '标签', type: 'string' },
+    ],
+    'x-ai': { summary: '单指标完成度/健康度（0~max 进度环）', useWhen: '达成率、健康分、利用率' },
+  },
+  {
+    componentName: 'SectionTitle', package: PKG, exportName: 'SectionTitle',
+    title: '区块标题', category: 'display',
+    defaultProps: { title: '区块标题', divider: true },
+    defaultSize: { w: 12, h: 2 },
+    configurableProps: [
+      { name: 'title', title: '标题', type: 'string' },
+      { name: 'subtitle', title: '副标题', type: 'string' },
+      { name: 'divider', title: '分隔线', type: 'boolean' },
+    ],
+    'x-ai': { summary: '报告分节标题（主/副标题 + 分隔线）', useWhen: '把报告划分成多个章节时' },
+  },
 ];
 
 export function getMaterialMeta(componentName: string): MaterialMeta | undefined {

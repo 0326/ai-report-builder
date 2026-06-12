@@ -1,0 +1,60 @@
+/* DAF 商业级主题精修：在 Fusion/LCE 默认皮肤之上做克制覆盖 */
+
+:root {
+  --daf-brand: #3370ff;
+  --daf-ink: #1f2329;
+  --daf-line: #eceef1;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 顶栏：干净的白底 + 细分割线 + 轻投影 */
+.lc-top-area {
+  background: #fff !important;
+  border-bottom: 1px solid var(--daf-line) !important;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+
+/* 左侧 dock 栏 */
+.lc-left-area {
+  background: #fafbfc !important;
+  border-right: 1px solid var(--daf-line) !important;
+}
+
+/* 面板标题 */
+.lc-panel-title,
+.lc-pane-title {
+  font-weight: 600 !important;
+  color: var(--daf-ink) !important;
+}
+
+/* 画布区：柔和底色 */
+.lc-main-area {
+  background: #f2f4f7 !important;
+}
+
+/* 模拟器画布卡片化 */
+.lc-simulator-canvas,
+.lc-simulator-content {
+  border-radius: 10px;
+}
+
+/* 右侧设置面板 */
+.lc-right-area {
+  border-left: 1px solid var(--daf-line) !important;
+  background: #fff !important;
+}
+
+/* 全局细滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #d4d9e1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #b9c1cd; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 预览覆盖层（preview-overlay 插件） */
+.daf-preview-overlay {
+  box-shadow: inset 0 1px 0 var(--daf-line);
+}
