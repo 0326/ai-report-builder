@@ -6,3 +6,4 @@ export { installDesigntimeSDK } from './iframe.ts';
 export type { InstallOptions } from './iframe.ts';
 export { connectPreview } from './host.ts';
 export type { PreviewHandle, ConnectOptions } from './host.ts';
+export { mergeXFields } from './schema-merge.ts';

@@ -12,7 +12,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join, resolve, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildAll, IMPORT_MAP, readSchema } from '@daf/report-scripts';
+import { buildAll, IMPORT_MAP, readSchema, deriveLceAssets } from '@daf/report-scripts';
+import { materialMetas } from '@daf-materials/kit/meta';
 import { queryDataset, KNOWN_DATASETS } from './fixtures.ts';
 import { saveSchema } from './schema-store.ts';
 
@@ -137,6 +138,13 @@ const server = createServer((req, res) => {
   if (req.method === 'POST' && path === '/api/daf/query') return void handleQuery(req, res);
   if (req.method === 'GET' && path === '/api/schema') {
     return send(res, 200, JSON.stringify(readSchema(PROJECT_DIR)), MIME['.json']);
+  }
+  if (req.method === 'GET' && path === '/api/lce/assets') {
+    const assets = deriveLceAssets(materialMetas, {
+      materialsUrl: '/artifacts/lce/materials.umd.js',
+      runtimeDesignUrl: '/artifacts/lce/runtime-design.umd.js',
+    });
+    return send(res, 200, JSON.stringify(assets), MIME['.json']);
   }
   if (req.method === 'PUT' && path === '/api/schema') return void handleSchemaPut(req, res);
   if (req.method === 'GET' && path.startsWith('/artifacts/')) return void serveArtifact(res, path);

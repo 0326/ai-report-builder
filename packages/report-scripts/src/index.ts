@@ -13,3 +13,7 @@ export type { VendorBuildResult } from './vendor.ts';
 export { buildAll } from './pipeline.ts';
 export type { BuildAllResult } from './pipeline.ts';
 export { generateBundleEntry } from './template.ts';
+export { deriveLceAssets } from './lce-assets.ts';
+export type { LceAssets, LceAssetsOptions } from './lce-assets.ts';
+export { buildLceBundles } from './lce-build.ts';
+export type { LceBuildResult } from './lce-build.ts';

@@ -3,14 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI 报告搭建工作台</title>
+  <title>AI 报告搭建工作台 · LowCode Engine</title>
+  <link rel="stylesheet" href="/lce-vendor/theme-variables.css" />
+  <link rel="stylesheet" href="/lce-vendor/next.var.min.css" />
+  <link rel="stylesheet" href="/lce-vendor/css/engine-core.css" />
+  <link rel="stylesheet" href="/lce-vendor/css/engine-ext.css" />
   <style>
-    html, body, #root { height: 100%; margin: 0; }
-    body { font-family: system-ui, -apple-system, "PingFang SC", sans-serif; }
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, "PingFang SC", sans-serif; }
+    #lce-container { height: 100vh; }
   </style>
+  <!-- UMD 依赖（本地服务，零 CDN）：顺序敏感 -->
+  <script src="/lce-vendor/react.js"></script>
+  <script src="/lce-vendor/react-dom.js"></script>
+  <script src="/lce-vendor/prop-types.js"></script>
+  <script src="/lce-vendor/lodash.js"></script>
+  <script src="/lce-vendor/moment.js"></script>
+  <script src="/lce-vendor/next.js"></script>
+  <script src="/lce-vendor/js/engine-core.js"></script>
+  <script src="/lce-vendor/js/engine-ext.js"></script>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
+  <div id="lce-container"></div>
+  <script type="module" src="/src/index.ts"></script>
 </body>
 </html>

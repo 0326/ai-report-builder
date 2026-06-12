@@ -7,8 +7,8 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 - [x] **第 1 轮**：`@daf/report-runtime`（内核 + P0 模块 + 渲染器）、`@daf-materials/kit`（antd + VChart/VTable 首批物料）。26 个单测通过。
 - [x] **第 2 轮**：template-report（周报 schema + TrendBlock + 纯函数）、report-scripts（真 esbuild 构建/vendor 共享依赖/声明一致性 lint/manifest 派生/CLI）、mock-server（node:http 零依赖：DAF 查询 + 预览 HTML + 产物静态服务）。浏览器 `pnpm dev` 打开周报，切区域筛选图表联动刷新（声明性，零构建）。34 个单测通过。
 - [x] **第 3 轮**：designtime-sdk（Bridge postMessage JSON-RPC：token 握手 + enable/highlight/getSchema/getSelection/onSelect/runtime.action/theme.sync/schema.reload）、host 工作台（Vite+antd 三栏：对话占位/预览 iframe/可视编排三投影 tab + materialMetas 属性面板）、schema 直更新管线（PUT /api/schema 写盘存版本 → Bridge schema.reload → runtime 重建，实测 317ms 零构建）。42 个单测通过。
-- [ ] **第 4 轮**：标注选区 + 布局拖拽 + 物料拖入 + 双 diff
-- [ ] **第 5 轮**：mock Agent 对话 + 真 esbuild 沙箱构建 + 时间线撤销
+- [x] **第 4 轮（用户指令重构）**：搭建态切换到 **lowcode-engine**。host = LCE 设计器壳（react16 UMD + Fusion Next + engine-core/ext 全本地化，零 CDN）+ 自研插件（editor-init / setters-registry / save-and-preview / chat-pane 占位）+ 官方 components-pane；物料 assets 从 materialMetas 派生（packages UMD + componentMeta + setters + snippets，`/api/lce/assets`）；schema 经 mergeXFields 保真合并后走原 PUT 直更新管线（浏览器实测：donut 改动落盘 + 全部 x- 字段不丢，17ms 零构建）。45 个单测通过。
+- [ ] **第 5 轮**：mock Agent 对话 + 真 esbuild 沙箱构建 + 双 diff + 时间线撤销 + 标注选区（designtime-sdk overlay 已有基础，接入真实预览链路）
 
 每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
 
@@ -17,7 +17,8 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 1. 沙箱构建用**真 esbuild**：mock-server 真改 template-report 源码、真增量构建出新 bundle（hash 寻址），不是假延时切 URL。
 2. 标注定位第一版**只做块级** `data-node-id`，源码级 `data-loc`（babel 注入）5 轮之后再说。
 3. 物料独立成包 `@daf-materials/kit`，模拟"CDN 共享依赖、不打进报告 bundle"语义。
-4. 技术栈：React 18 + TS strict + Vite；host 用 antd 5；图表 @visactor/vchart、表格 @visactor/vtable；mock-server 用 node:http **零依赖**。
+4. 技术栈：运行态 React 18 + TS strict + Vite；图表 @visactor/vchart、表格 @visactor/vtable；mock-server 用 node:http **零依赖**。
+5. **搭建态基于 lowcode-engine**（2026-06-12 用户指令）：host = LCE 设计器（react16 UMD 壳 + Fusion Next，UMD 全部本地服务零 CDN），自研三栏 UI 已废弃。`report.schema.json` 直接 importSchema 进引擎；导出经 `mergeXFields`（designtime-sdk）做 x- 扩展字段保真，再走 PUT /api/schema 直更新。物料 LCE assets 由 materialMetas 单源派生（`deriveLceAssets`），componentMeta 不手写。AIBlock 画布渲染用设计态占位 UMD，真实渲染走运行态预览（/preview/，React 18 链路不变）。
 
 ## 架构铁律（来自方案，违反即返工）
 
@@ -42,10 +43,10 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 packages/report-runtime   内核(kernel.ts) + P0模块(modules/) + 渲染器(renderer/)  [已完成]
 packages/materials        @daf-materials/kit 物料 + meta.ts(componentMeta+x-ai)   [已完成]
 packages/report-scripts   esbuild 构建 / 声明一致性 lint / manifest 派生          [第2轮]
-packages/designtime-sdk   选区 overlay / 块级定位 / Bridge JSON-RPC               [第3-4轮]
-packages/mock-server      DAF查询 mock / Agent剧本 / 沙箱构建 / 产物静态服务      [第2轮起]
-apps/template-report      示例报告工程: report.schema.json + src/blocks           [第2轮]
-apps/host                 搭建工作台: 对话/画布/可视编排/物料/双diff              [第3轮起]
+packages/designtime-sdk   Bridge JSON-RPC / 选区 overlay / mergeXFields x-保真     [已完成]
+packages/mock-server      DAF查询 mock / schema直更新 / LCE assets / 产物静态服务  [已完成]
+apps/template-report      示例报告工程: report.schema.json + src/blocks           [已完成]
+apps/host                 LCE 设计器壳 + 插件(editor-init/setters/save/chat)      [第4轮重构]
 ```
 
 第 1 轮已交付的关键 API（后续轮直接消费，勿重复造）：
@@ -69,15 +70,18 @@ apps/host                 搭建工作台: 对话/画布/可视编排/物料/双
 - schema 直更新管线：host 改 schema → `PUT /api/schema` → mock-server 写盘存新版本 → 通知 iframe（Bridge `schema.reload`）→ runtime 重建并重渲染。属性面板用 materialMetas.configurableProps 生成表单。
 - 验收：结构树点选块、属性面板改 donut/标题 → 预览 ≤2s 更新，无构建发生。
 
-### 第 4 轮：标注 + 拖拽 + 双 diff（方案 §3.2/§3.4 链路二三）
+### 第 4 轮（已完成，形态调整）：搭建态基于 lowcode-engine
 
-- designtime-sdk 标注模式：overlay 层（不侵入业务 DOM）悬浮高亮 + 点选命中 `data-node-id` → 组装选区上下文包（schemaSlice + runtimeState 数据样本）→ Bridge 上报 host 显示。
-- 布局拖拽：overlay 上拖块改 x-position（12 列栅格吸附），确定性回写 schema 走直更新管线。
-- 物料拖入：host 物料面板（materialMetas 渲染）拖到画布 → componentsMap 增引用 + children 插标准节点（defaultProps + defaultSize + 数据绑定向导选 dsId）→ schema 直更新。
-- 双 diff：schema diff（自实现 JSON 对比或 jsondiffpatch）+ 代码 diff（按文件折叠），确认后才提交；破坏性变更（删块/删数据源）红色警示。
-- 验收：点选饼图出上下文、拖块换位即时生效、拖入 DataTable 绑定 ds 后渲染、每次修改先出 diff 确认。
+原计划的「布局拖拽 / 物料拖入 / 属性编辑」由 LCE 引擎原生能力承接（components-pane 拖入、setter 面板、画布拖拽）；自研部分收敛为：
 
-### 第 5 轮：mock Agent + 构建管线 + 撤销（方案 §3.4 链路一/§3.5）
+- LCE assets 派生（`report-scripts/lce-assets.ts`）+ 物料 UMD 构建（`lce-build.ts`，react 外置 window 全局）。
+- x- 扩展字段保真（`designtime-sdk/schema-merge.ts`）：引擎导出丢什么补什么，导出值优先。
+- host 插件四件套 + UMD 本地化 vite 中间件（`/lce-vendor/*`）。
+- 模拟器画布 iframe 复用宿主 React16（引擎默认 environment），物料 UMD + Next 经 assets packages 注入。
+
+未迁移项（并入第 5 轮）：标注选区上下文包（designtime-sdk overlay 走真实预览链路）、双 diff。
+
+### 第 5 轮：mock Agent + 构建管线 + 双 diff + 撤销（方案 §3.4 链路一/§3.5）
 
 - Agent 剧本（`mock-server/fixtures/agent-scripts/`）：意图关键词匹配 → 固定响应。至少三个剧本：① "做周报…" → 全量 schema + TrendBlock 代码 → 走构建；② 选区+"改成环形图，点击渠道联动趋势" → 纯 schema patch（对齐方案附录 A 的 diff）→ 直更新；③ "加一个留存漏斗块" → schema + 新块代码 → 增量构建。响应含结构化过程卡（数据集/物料选用理由/变更摘要）。
 - 沙箱构建 mock：`POST /api/sandbox/build` → 真改 template-report 源码 → 调 report-scripts lint+esbuild → 新 hash 产物 → 返回新 URL，host 切 iframe。失败回喂剧本自修复（≤2 次）。

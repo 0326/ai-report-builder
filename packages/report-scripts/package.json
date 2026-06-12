@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@daf-materials/kit": "workspace:*",
     "@daf/report-runtime": "workspace:*",
     "esbuild": "^0.25.0"
   }
