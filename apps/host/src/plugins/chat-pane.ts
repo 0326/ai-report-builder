@@ -1,27 +1,34 @@
 /**
- * 对话搭建面板：iframe 嵌入独立 React 18 工作台（apps/chat，Ant Design X + 标注预览）。
- * LCE 壳是 React 16，对话 UI 经 iframe 解耦；/chat 经 vite 代理到 mock-server。
- * 每轮提交后 chat 应用 postMessage 回传 → 重载设计器画布 + 刷新时间线 + 切预览。
+ * 对话搭建面板（纯 chat，嵌入模式）：iframe 嵌入 React 18 工作台（apps/chat，Ant Design X）。
+ * 预览/标注已并入设计器画布（preview-overlay）——选区经宿主中转进对话；
+ * 每轮提交后 chat postMessage 回传 → 重载画布 + 刷新时间线 + 预览层切新产物。
  */
-import { createElement as h, useEffect, Fragment } from 'react';
+import { createElement as h, useEffect, useCallback, Fragment } from 'react';
 import type { IPublicModelPluginContext } from '@alilc/lowcode-types';
-import { emitPreview, emitTimeline, reloadDesigner } from '../bus.ts';
+import { emitPreview, emitTimeline, reloadDesigner, setChatFrame, markChatReady } from '../bus.ts';
 
 function ChatFrame() {
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       const data = e.data as { type?: string; previewUrl?: string } | undefined;
+      if (data?.type === 'daf-chat:ready') return markChatReady();
       if (data?.type !== 'daf-chat:round') return;
       if (data.previewUrl) emitPreview(data.previewUrl);
       void reloadDesigner();
       emitTimeline();
     };
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      setChatFrame(null);
+    };
   }, []);
 
+  const ref = useCallback((el: HTMLIFrameElement | null) => setChatFrame(el), []);
+
   return h('iframe', {
-    src: '/chat/',
+    ref,
+    src: '/chat/?embedded=1',
     title: 'daf-chat',
     style: { width: '100%', height: '100%', border: 'none', display: 'block' },
   });
@@ -32,8 +39,8 @@ const ChatPanePlugin = (ctx: IPublicModelPluginContext) => ({
     ctx.skeleton.add({
       area: 'leftArea', type: 'PanelDock', name: 'dafChatPane',
       content: () => h(Fragment, null, h(ChatFrame)),
-      panelProps: { width: 980, title: 'AI 搭建（对话 + 标注预览）' },
-      props: { align: 'top', icon: 'xiaoxi', description: 'AI 搭建' },
+      panelProps: { width: 420, title: 'AI 搭建对话' },
+      props: { align: 'top', icon: 'xiaoxi', description: 'AI 搭建对话' },
     });
   },
 });

@@ -38,6 +38,32 @@ export function emitTimeline(): void {
   for (const fn of timelineListeners) fn();
 }
 
+/* ---------------- 对话面板 iframe（嵌入模式消息通道） ---------------- */
+
+let chatFrame: HTMLIFrameElement | null = null;
+let chatReady = false;
+const chatQueue: Array<Record<string, unknown>> = [];
+
+export function setChatFrame(el: HTMLIFrameElement | null): void {
+  chatFrame = el;
+  if (!el) chatReady = false;
+}
+
+/** 对话 iframe 上报 ready（嵌入模式握手）→ 冲刷积压消息。 */
+export function markChatReady(): void {
+  chatReady = true;
+  while (chatQueue.length) chatFrame?.contentWindow?.postMessage(chatQueue.shift(), '*');
+}
+
+/** 宿主 → 对话 iframe（选区上下文 / 标注状态同步）；未就绪时缓冲，ready 后送达。 */
+export function sendToChat(msg: Record<string, unknown>): void {
+  if (chatReady && chatFrame?.contentWindow) {
+    chatFrame.contentWindow.postMessage(msg, '*');
+  } else {
+    chatQueue.push(msg);
+  }
+}
+
 /** 当前选区（best-effort；取不到返回 null，剧本侧有 componentName 兜底）。 */
 export function currentSelection(): SelectionCtx | null {
   try {

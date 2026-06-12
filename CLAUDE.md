@@ -12,6 +12,8 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 
 - [x] **第 6 轮（用户指令：去 demo 化）**：对话搭建接入**真实 Claude 模型**（`mock-server/claude.ts` 零依赖 fetch+SSE 调 Messages API：claude-opus-4-8 + adaptive thinking + tool use 多轮循环；`llm-agent.ts` 工具集 read_project/read_file/query_dataset/stage_schema/stage_file/commit_round，lint/构建失败回喂自修复，commit 失败 mixed-reset 保留工作区；凭证走 env 或仓库根 `.env`，无凭证回落剧本 mock，同一 SSE 事件协议）。对话 UI 换**开源方案 @ant-design/x**（apps/chat：React 18 独立页 Bubble/Sender/ThoughtChain，esbuild 构建共享 vendor react 单例，5173 `/chat/` 服务；LCE 宿主 dock iframe 嵌入 + postMessage 回传重载画布/时间线）。**标注修改对齐 Claude Desktop preview 形态**：chat 页右侧预览 iframe 同源直连 designtime Bridge，标注模式点选块（data-node-id）→ 输入框上方选区 chip → 随消息作为上下文发给模型。62 单测通过（+7：SSE 解析/重试/thinking 签名、stub 模型全链路自修复）。浏览器实测：剧本与桥路全链路 ①生成周报→标注选「渠道占比」→②改环形（零构建 round(2)，渠道筛选器上线）。
 
+- [x] **第 7 轮（用户指令：预览并入设计器）**：host 新增 preview-overlay 插件——顶栏「设计 | 预览」切换，预览 = mainArea 上盖运行态 iframe（切换前静默保存保证画布↔产物一致），画布保持挂载不丢状态；标注在中央预览进行，选区经 Bridge → 宿主 postMessage → 对话 dock 成 chip（ready 握手 + 消息缓冲解决 dock 懒挂载丢消息）。对话面板瘦身为纯 chat（/chat/?embedded=1 嵌入模式），独立 /chat/ 仍保留自带预览的分栏形态。Agent 每轮提交 → 中央预览自动切产物 + 画布重载。
+
 每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
 
 ## 已确认的实现决策（不要改）

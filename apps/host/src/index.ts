@@ -10,7 +10,7 @@ import DefaultSettersRegistryPlugin from './plugins/setters-registry.ts';
 import SaveAndPreviewPlugin from './plugins/save-and-preview.ts';
 import ChatPanePlugin from './plugins/chat-pane.ts';
 import TimelinePanePlugin from './plugins/timeline-pane.ts';
-import PreviewPanePlugin from './plugins/preview-pane.ts';
+import PreviewOverlayPlugin from './plugins/preview-overlay.ts';
 
 /** daf-query 数据源 → mock-server DAF 查询（画布内真实数据） */
 function createDafQueryHandler() {
@@ -33,7 +33,7 @@ async function main() {
   await plugins.register(SaveAndPreviewPlugin as never);
   await plugins.register(ChatPanePlugin as never);
   await plugins.register(TimelinePanePlugin as never);
-  await plugins.register(PreviewPanePlugin as never);
+  await plugins.register(PreviewOverlayPlugin as never);
 
   await init(document.getElementById('lce-container')!, {
     locale: 'zh-CN',

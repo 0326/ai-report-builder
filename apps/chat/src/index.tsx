@@ -33,9 +33,15 @@ interface Msg {
 
 const sessionId = crypto.randomUUID();
 const DT_TOKEN = crypto.randomUUID();
+/** 嵌入模式（LCE 设计器 dock 内）：纯对话——预览/标注由宿主画布承载，选区经 postMessage 互通。 */
+const EMBEDDED = new URLSearchParams(location.search).get('embedded') === '1';
 
 function withDesigntime(url: string): string {
   return url + (url.includes('?') ? '&' : '?') + `designtime=1&dtToken=${DT_TOKEN}`;
+}
+
+function postToHost(msg: Record<string, unknown>): void {
+  if (window.parent !== window) window.parent.postMessage(msg, '*');
 }
 
 function notifyHost(round: RoundResult): void {
@@ -65,6 +71,23 @@ function ChatApp() {
   useEffect(() => { annotatingRef.current = annotating; }, [annotating]);
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); });
 
+  // 嵌入模式：握手 ready（宿主冲刷积压的选区消息）+ 接收宿主选区 / 标注状态
+  useEffect(() => {
+    if (!EMBEDDED) return;
+    postToHost({ type: 'daf-chat:ready' });
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as { type?: string; selection?: SelectionCtx; on?: boolean } | undefined;
+      if (data?.type === 'daf-host:selection' && data.selection) {
+        setSelection(data.selection);
+        setAnnotating(false);
+      } else if (data?.type === 'daf-host:annotate-state') {
+        setAnnotating(Boolean(data.on));
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
   /** 预览 iframe 每次加载后重建 Bridge（产物切换 = 整页重载）。 */
   const onIframeLoad = useCallback(() => {
     handleRef.current?.dispose();
@@ -84,6 +107,11 @@ function ChatApp() {
   }, []);
 
   const toggleAnnotate = useCallback(() => {
+    if (EMBEDDED) {
+      // 宿主负责切到画布预览模式并开标注；状态经 annotate-state 回同步
+      postToHost({ type: 'daf-chat:annotate-request' });
+      return;
+    }
     const next = !annotatingRef.current;
     setAnnotating(next);
     void handleRef.current?.enable(next ? 'annotate' : 'browse');
@@ -91,7 +119,8 @@ function ChatApp() {
 
   const clearSelection = useCallback(() => {
     setSelection(null);
-    void handleRef.current?.highlight(null);
+    if (EMBEDDED) postToHost({ type: 'daf-chat:selection-clear' });
+    else void handleRef.current?.highlight(null);
   }, []);
 
   async function send(raw: string) {
@@ -111,7 +140,8 @@ function ChatApp() {
       { id: aiId, role: 'ai', view: { ...view } },
     ]);
     setSelection(null);
-    void handleRef.current?.highlight(null);
+    if (EMBEDDED) postToHost({ type: 'daf-chat:selection-clear' });
+    else void handleRef.current?.highlight(null);
 
     const patch = () => setMsgs((m) => m.map((x) => (x.id === aiId ? { ...x, view: { ...view, steps: [...view.steps] } } : x)));
 
@@ -175,8 +205,8 @@ function ChatApp() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', minWidth: 0 }}>
-      {/* 左：对话 */}
-      <div style={{ width: 440, minWidth: 360, display: 'flex', flexDirection: 'column', borderRight: '1px solid #e5e6eb' }}>
+      {/* 左：对话（嵌入模式独占全宽） */}
+      <div style={{ width: EMBEDDED ? '100%' : 440, minWidth: 320, display: 'flex', flexDirection: 'column', borderRight: EMBEDDED ? 'none' : '1px solid #e5e6eb' }}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid #e5e6eb', display: 'flex', alignItems: 'center', gap: 8 }}>
           <RobotOutlined style={{ color: '#3370ff' }} />
           <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>对话搭建</span>
@@ -194,7 +224,7 @@ function ChatApp() {
                 <div key={i} style={{ cursor: 'pointer', color: '#3370ff' }} onClick={() => void send(s)}>{i + 1}. {s}</div>
               ))}
               <div style={{ marginTop: 10, fontSize: 12, color: '#8f959e' }}>
-                <AimOutlined /> 点右上「标注」后在预览里点选任意块，再描述改法 —— 选区会作为上下文发给模型。
+                <AimOutlined /> 点输入框旁「标注」，在预览里点选任意块后描述改法 —— 选区会作为上下文发给模型。
               </div>
             </div>
           ) : (
@@ -234,8 +264,8 @@ function ChatApp() {
         </div>
       </div>
 
-      {/* 右：运行态预览 */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: '#f5f6f7' }}>
+      {/* 右：运行态预览（嵌入模式由宿主画布承载，不渲染） */}
+      {!EMBEDDED && <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: '#f5f6f7' }}>
         <div style={{ padding: '8px 12px', borderBottom: '1px solid #e5e6eb', background: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Button size="small" type={annotating ? 'primary' : 'default'} icon={<AimOutlined />} onClick={toggleAnnotate}>
             {annotating ? '点选预览中的块…' : '标注'}
@@ -254,7 +284,7 @@ function ChatApp() {
           onLoad={onIframeLoad}
           style={{ flex: 1, border: 'none', width: '100%' }}
         />
-      </div>
+      </div>}
     </div>
   );
 }
