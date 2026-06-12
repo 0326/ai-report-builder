@@ -68,6 +68,7 @@ export default defineConfig({
       '/api': 'http://localhost:5173',
       '/preview': 'http://localhost:5173',
       '/artifacts': 'http://localhost:5173',
+      '/chat': 'http://localhost:5173',
     },
   },
 });

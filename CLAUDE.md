@@ -10,6 +10,8 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 - [x] **第 4 轮（用户指令重构）**：搭建态切换到 **lowcode-engine**。host = LCE 设计器壳（react16 UMD + Fusion Next + engine-core/ext 全本地化，零 CDN）+ 自研插件（editor-init / setters-registry / save-and-preview / chat-pane 占位）+ 官方 components-pane；物料 assets 从 materialMetas 派生（packages UMD + componentMeta + setters + snippets，`/api/lce/assets`）；schema 经 mergeXFields 保真合并后走原 PUT 直更新管线（浏览器实测：donut 改动落盘 + 全部 x- 字段不丢，17ms 零构建）。45 个单测通过。
 - [x] **第 5 轮**：报告工程 = 一个 git 沙箱工作区（`.artifacts/sandbox/project`，与主仓库隔离），一切修改落成 commit、产物按 commit hash 缓存。mock Agent 三剧本（关键词匹配→固定响应+过程卡）：① 空白基线 "做周报" → 全量 schema+TrendBlock 代码 → 真 esbuild 构建；② 选区 "改环形+联动" → 纯 schema patch（对齐附录 A）→ 零构建直更新；③ "加留存漏斗块" → 首版裸 fetch 被 lint 拦截 → 自修复改用 runtime.data 重试（≤2 次）。双 diff（schemaDiff jsondiffpatch 风格 + codeDiff 行级 LCS）、版本时间线（git log）、回滚切产物 URL（秒级零重建）。host 新增 对话/时间线/运行态预览 三面板 + 选区上下文链路，editor-init 冷启动重试容错。浏览器实测：空白→①②③ 端到端跑通，运行态预览渲染含漏斗块的完整周报（真实数据）。55 个单测通过（+10）。
 
+- [x] **第 6 轮（用户指令：去 demo 化）**：对话搭建接入**真实 Claude 模型**（`mock-server/claude.ts` 零依赖 fetch+SSE 调 Messages API：claude-opus-4-8 + adaptive thinking + tool use 多轮循环；`llm-agent.ts` 工具集 read_project/read_file/query_dataset/stage_schema/stage_file/commit_round，lint/构建失败回喂自修复，commit 失败 mixed-reset 保留工作区；凭证走 env 或仓库根 `.env`，无凭证回落剧本 mock，同一 SSE 事件协议）。对话 UI 换**开源方案 @ant-design/x**（apps/chat：React 18 独立页 Bubble/Sender/ThoughtChain，esbuild 构建共享 vendor react 单例，5173 `/chat/` 服务；LCE 宿主 dock iframe 嵌入 + postMessage 回传重载画布/时间线）。**标注修改对齐 Claude Desktop preview 形态**：chat 页右侧预览 iframe 同源直连 designtime Bridge，标注模式点选块（data-node-id）→ 输入框上方选区 chip → 随消息作为上下文发给模型。62 单测通过（+7：SSE 解析/重试/thinking 签名、stub 模型全链路自修复）。浏览器实测：剧本与桥路全链路 ①生成周报→标注选「渠道占比」→②改环形（零构建 round(2)，渠道筛选器上线）。
+
 每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
 
 ## 已确认的实现决策（不要改）
@@ -18,7 +20,8 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 2. 标注定位第一版**只做块级** `data-node-id`，源码级 `data-loc`（babel 注入）5 轮之后再说。
 3. 物料独立成包 `@daf-materials/kit`，模拟"CDN 共享依赖、不打进报告 bundle"语义。
 4. 技术栈：运行态 React 18 + TS strict + Vite；图表 @visactor/vchart、表格 @visactor/vtable；mock-server 用 node:http **零依赖**。
-5. **搭建态基于 lowcode-engine**（2026-06-12 用户指令）：host = LCE 设计器（react16 UMD 壳 + Fusion Next，UMD 全部本地服务零 CDN），自研三栏 UI 已废弃。`report.schema.json` 直接 importSchema 进引擎；导出经 `mergeXFields`（designtime-sdk）做 x- 扩展字段保真，再走 PUT /api/schema 直更新。物料 LCE assets 由 materialMetas 单源派生（`deriveLceAssets`），componentMeta 不手写。AIBlock 画布渲染用设计态占位 UMD，真实渲染走运行态预览（/preview/，React 18 链路不变）。
+5. **Agent 对话必须真模型 + 开源 UI**（2026-06-12 用户指令，第 6 轮起）：对话消息列表基于 @ant-design/x（不自研聊天 UI）；Agent 接真实 Claude（Messages API，零依赖 fetch，凭证 `.env`/env 注入，无凭证才回落剧本）；标注修改参考 Claude Desktop 的 preview 形态（预览点选 DOM 块 → 输入框 chip → 上下文随消息发模型）。剧本 mock 仅作离线回落与测试 stub，不是产品形态。
+6. **搭建态基于 lowcode-engine**（2026-06-12 用户指令）：host = LCE 设计器（react16 UMD 壳 + Fusion Next，UMD 全部本地服务零 CDN），自研三栏 UI 已废弃。`report.schema.json` 直接 importSchema 进引擎；导出经 `mergeXFields`（designtime-sdk）做 x- 扩展字段保真，再走 PUT /api/schema 直更新。物料 LCE assets 由 materialMetas 单源派生（`deriveLceAssets`），componentMeta 不手写。AIBlock 画布渲染用设计态占位 UMD，真实渲染走运行态预览（/preview/，React 18 链路不变）。
 
 ## 架构铁律（来自方案，违反即返工）
 

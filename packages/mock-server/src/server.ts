@@ -17,13 +17,15 @@ import { readFile, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join, resolve, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildVendor, buildLceBundles, IMPORT_MAP, deriveLceAssets } from '@daf/report-scripts';
+import { buildVendor, buildLceBundles, buildChatApp, IMPORT_MAP, deriveLceAssets } from '@daf/report-scripts';
 import { materialMetas } from '@daf-materials/kit/meta';
 import { queryDataset, KNOWN_DATASETS } from './fixtures.ts';
 import { validateSchema } from './schema-store.ts';
 import { Sandbox } from './sandbox.ts';
 import { seedFiles } from './agent-scripts.ts';
 import { runAgentTurn } from './agent.ts';
+import { runLlmTurn, resetSession, type AgentEvent } from './llm-agent.ts';
+import { getLlmConfig } from './env.ts';
 import type { ReportSchema } from '@daf/report-runtime/core';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -80,6 +82,27 @@ function previewHtml(buildId: string): string {
   };
 </script>
 <script type="module" src="/artifacts/preview/preview.js"></script>
+</body>
+</html>`;
+}
+
+/** AI 搭建工作台（React 18 + Ant Design X，esbuild 产物；左对话右预览，标注直连同源预览 iframe）。 */
+function chatHtml(): string {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI 报告搭建</title>
+<script type="importmap">${JSON.stringify({ imports: IMPORT_MAP })}</script>
+<style>
+  html, body, #root { height: 100%; margin: 0; }
+  body { font-family: system-ui, -apple-system, "PingFang SC", sans-serif; background: #fff; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/artifacts/chat/chat.js"></script>
 </body>
 </html>`;
 }
@@ -160,25 +183,68 @@ async function handleSchemaPut(req: import('node:http').IncomingMessage, res: im
   }
 }
 
+/**
+ * 对话搭建（SSE 流式）：凭证就绪走真实 Claude Agent（llm-agent），
+ * 否则回落剧本 mock（同一事件协议，UI 无差别）。
+ */
 async function handleAgentChat(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
-  let body: { message?: string; selection?: unknown };
+  let body: { message?: string; selection?: unknown; sessionId?: string };
   try {
     body = await readJson(req);
   } catch {
     return sendJson(res, 400, { error: 'invalid json' });
   }
   if (!body?.message) return sendJson(res, 400, { error: '缺少 message' });
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+  });
+  const emit = (ev: AgentEvent) => res.write(`data: ${JSON.stringify(ev)}\n\n`);
+
   try {
-    const result = await runAgentTurn(sandbox, FIXTURES_DIR, { message: body.message, selection: body.selection as never });
-    if (result.ok && result.commit) {
-      currentHead = result.commit.hash;
-      console.log(`  ✓ Agent ${result.intent} → ${result.commit.hash.slice(0, 8)}（${result.pipeline}, ${result.buildMs ?? 0}ms）`);
+    if (getLlmConfig().enabled) {
+      await runLlmTurn(
+        sandbox,
+        { sessionId: body.sessionId ?? 'default', message: body.message, selection: body.selection as never },
+        (ev) => {
+          if (ev.t === 'round' && ev.result.ok) {
+            currentHead = ev.result.commit.hash;
+            console.log(`  ✓ Agent(${getLlmConfig().model}) ${ev.result.intent} → ${ev.result.commit.hash.slice(0, 8)}（${ev.result.pipeline}, ${ev.result.buildMs}ms）`);
+          }
+          emit(ev);
+        },
+      );
+    } else {
+      // 剧本回落：适配为同一 SSE 事件流
+      const result = await runAgentTurn(sandbox, FIXTURES_DIR, { message: body.message, selection: body.selection as never });
+      if (result.ok && result.commit) {
+        currentHead = result.commit.hash;
+        console.log(`  ✓ Agent(剧本) ${result.intent} → ${result.commit.hash.slice(0, 8)}（${result.pipeline}, ${result.buildMs ?? 0}ms）`);
+        emit({ t: 'text', delta: result.reply });
+        emit({
+          t: 'round',
+          result: {
+            ok: true,
+            intent: result.intent ?? '',
+            pipeline: result.pipeline ?? 'schema',
+            buildMs: result.buildMs ?? 0,
+            commit: { ...result.commit, message: '' },
+            diff: (result.diff ?? { schema: { summary: [], destructive: false, opCount: 0 }, code: [] }) as never,
+            previewUrl: result.previewUrl ?? '/preview/',
+          },
+        });
+      } else {
+        emit({ t: 'text', delta: result.reply });
+      }
+      emit({ t: 'done' });
     }
-    sendJson(res, 200, result);
   } catch (e) {
     sandbox.reset();
-    sendJson(res, 500, { error: (e as Error).message });
+    emit({ t: 'error', message: (e as Error).message });
   }
+  res.end();
 }
 
 function handleTimeline(res: import('node:http').ServerResponse) {
@@ -221,6 +287,21 @@ const server = createServer((req, res) => {
   if (m === 'GET' && path === '/api/schema') return sendJson(res, 200, sandbox.readSchema());
   if (m === 'PUT' && path === '/api/schema') return void handleSchemaPut(req, res);
   if (m === 'POST' && path === '/api/agent/chat') return void handleAgentChat(req, res);
+  if (m === 'GET' && path === '/api/agent/config') {
+    const cfg = getLlmConfig();
+    return sendJson(res, 200, { llm: cfg.enabled, model: cfg.enabled ? cfg.model : null });
+  }
+  if (m === 'POST' && path === '/api/agent/reset') {
+    return void readJson<{ sessionId?: string }>(req)
+      .then((b) => {
+        resetSession(b?.sessionId ?? 'default');
+        sendJson(res, 200, { ok: true });
+      })
+      .catch(() => sendJson(res, 400, { error: 'invalid json' }));
+  }
+  if (m === 'GET' && (path === '/chat' || path === '/chat/')) {
+    return send(res, 200, chatHtml(), MIME['.html']);
+  }
   if (m === 'GET' && path === '/api/timeline') return handleTimeline(res);
   if (m === 'POST' && path === '/api/timeline/checkout') return void handleCheckout(req, res);
   if (m === 'GET' && path === '/api/lce/assets') {
@@ -240,11 +321,12 @@ const server = createServer((req, res) => {
 });
 
 async function main() {
-  console.log('› 构建共享依赖 vendor + 预览 harness + LCE 物料 UMD（真 esbuild）…');
+  console.log('› 构建共享依赖 vendor + 预览 harness + LCE 物料 UMD + 对话工作台（真 esbuild）…');
   const t0 = Date.now();
   await buildVendor(ARTIFACTS_DIR);
   await buildLceBundles(ARTIFACTS_DIR);
-  console.log(`  ✓ vendor/preview/lce 就绪（${Date.now() - t0}ms）`);
+  const chat = await buildChatApp(ARTIFACTS_DIR);
+  console.log(`  ✓ vendor/preview/lce/chat 就绪（${Date.now() - t0}ms，chat.js ${(chat.bytes / 1024 / 1024).toFixed(1)}MB）`);
 
   console.log('› 初始化报告工程沙箱（git 工作区 + 空白基线）…');
   const t1 = Date.now();
@@ -252,9 +334,15 @@ async function main() {
   currentHead = base.hash;
   console.log(`  ✓ 沙箱基线 ${base.hash.slice(0, 8)}（${Date.now() - t1}ms）`);
 
+  const llm = getLlmConfig();
   server.listen(PORT, () => {
-    console.log(`\n  报告预览  →  http://localhost:${PORT}/preview/`);
-    console.log(`  对话搭建从空白基线开始，试试：「做一份周报：DAU 趋势 + 渠道占比，按区域筛选」\n`);
+    console.log(`\n  AI 搭建工作台  →  http://localhost:${PORT}/chat/`);
+    console.log(`  报告预览      →  http://localhost:${PORT}/preview/`);
+    console.log(
+      llm.enabled
+        ? `  Agent: 真实模型 ${llm.model}（${llm.authToken ? 'OAuth token' : 'API key'}）\n`
+        : `  Agent: 剧本模式 —— 在仓库根 .env 写入 ANTHROPIC_API_KEY=sk-… 后重启即接入真实模型\n`,
+    );
   });
 }
 

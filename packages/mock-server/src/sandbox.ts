@@ -130,10 +130,15 @@ export class Sandbox {
     return this.head();
   }
 
-  /** 撤掉最近一次 commit 并清空工作区（自修复：坏 attempt 提交后回退重试）。 */
+  /** 撤掉最近一次 commit 并清空工作区（剧本自修复：每次 attempt 全量重放）。 */
   undoLastCommit(): void {
     this.git('reset', '-q', '--hard', 'HEAD~1');
     this.git('clean', '-fdq');
+  }
+
+  /** 撤掉最近一次 commit 但保留工作区改动（LLM 自修复：只需改坏掉的文件再提交）。 */
+  undoLastCommitKeepWork(): void {
+    this.git('reset', '-q', '--mixed', 'HEAD~1');
   }
 
   /** 回滚到某 commit 的产物（秒级切 URL，零重建）；产物缺失则补构建。 */
@@ -155,6 +160,13 @@ export class Sandbox {
   /** 工作区相对 HEAD 是否有改动（无改动则不提交，避免空 commit）。 */
   isDirty(): boolean {
     return this.git('status', '--porcelain').length > 0;
+  }
+
+  /** 相对 HEAD 的改动文件相对路径列表（-uall：未跟踪目录展开为单个文件）。 */
+  status(): string[] {
+    const raw = this.git('status', '--porcelain', '-uall');
+    if (!raw) return [];
+    return raw.split('\n').map((l) => l.slice(3).trim()).filter(Boolean);
   }
 
   log(): CommitInfo[] {
