@@ -1,0 +1,13 @@
+{
+  "name": "@daf/designtime-sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./bridge": "./src/bridge.ts"
+  },
+  "dependencies": {
+    "@daf/report-runtime": "workspace:*"
+  }
+}

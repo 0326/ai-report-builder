@@ -5,6 +5,7 @@
   "type": "module",
   "main": "./src/server.ts",
   "dependencies": {
+    "@daf/report-runtime": "workspace:*",
     "@daf/report-scripts": "workspace:*"
   }
 }

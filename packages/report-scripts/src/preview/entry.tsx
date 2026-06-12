@@ -1,12 +1,13 @@
 /**
  * 浏览器预览 harness（构建为 preview.js，externalize 共享依赖经 import-map 解析）。
  * 职责：fetch schema → 动态 import 报告 bundle → 装配 runtime（dafQuery 走 mock-server）→ 渲染。
- * 这就是"schema 运行时 fetch、产物分离部署"的运行侧体现。
+ * 搭建态（?designtime=1）额外动态加载 DesignTime SDK —— 运行态产物零开销；
+ * schema 直更新 = 重 fetch schema → dispose 旧 runtime → 重建重渲染（不动 bundle）。
  */
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createReportRuntime, ReportRenderer, buildRegistry } from '@daf/report-runtime';
-import type { QueryRequest } from '@daf/report-runtime';
+import type { QueryRequest, RuntimeKernel } from '@daf/report-runtime';
 import { kitExports } from '@daf-materials/kit';
 
 interface PreviewConfig {
@@ -18,7 +19,6 @@ interface PreviewConfig {
 declare global {
   interface Window {
     __PREVIEW__?: PreviewConfig;
-    __DAF_RELOAD__?: () => Promise<void>;
   }
 }
 
@@ -41,23 +41,46 @@ async function main() {
     return;
   }
   const apiBase = cfg.apiBase ?? '';
+  const designtime = new URLSearchParams(window.location.search).get('designtime') === '1';
 
   try {
-    const [schema, bundleMod] = await Promise.all([
-      fetch(cfg.schemaUrl).then((r) => r.json()),
-      import(/* @vite-ignore */ cfg.bundleUrl),
-    ]);
-
-    const runtime = await createReportRuntime({
-      schema,
-      env: 'preview',
-      services: { dafQuery: (req) => dafQuery(req, apiBase) },
-      customHandlers: bundleMod.customHandlers,
-    });
-
-    const registry = buildRegistry(schema.componentsMap, { '@daf-materials/kit': kitExports });
+    const bundleMod = await import(/* @vite-ignore */ cfg.bundleUrl) as {
+      bundle: Record<string, never>;
+      customHandlers: Record<string, never>;
+    };
     const root = createRoot(mount);
-    root.render(createElement(ReportRenderer, { runtime, registry, bundle: bundleMod.bundle }));
+    let kernel: RuntimeKernel | null = null;
+
+    const boot = async (schemaUrl: string): Promise<void> => {
+      const schema = await fetch(schemaUrl, { cache: 'no-store' }).then((r) => {
+        if (!r.ok) throw new Error(`schema fetch failed: ${r.status}`);
+        return r.json();
+      });
+      kernel?.dispose();
+      kernel = await createReportRuntime({
+        schema,
+        env: designtime ? 'design' : 'preview',
+        services: { dafQuery: (req) => dafQuery(req, apiBase) },
+        customHandlers: bundleMod.customHandlers,
+      });
+      const registry = buildRegistry(schema.componentsMap, { '@daf-materials/kit': kitExports });
+      root.render(createElement(ReportRenderer, { runtime: kernel, registry, bundle: bundleMod.bundle }));
+    };
+
+    let lastSchemaUrl = cfg.schemaUrl;
+    await boot(lastSchemaUrl);
+
+    if (designtime) {
+      const sdk = await import('@daf/designtime-sdk');
+      sdk.installDesigntimeSDK({
+        getSchema: () => kernel!.ctx.schema,
+        getKernel: () => kernel,
+        reloadSchema: async (schemaUrl) => {
+          if (schemaUrl) lastSchemaUrl = schemaUrl;
+          await boot(lastSchemaUrl);
+        },
+      });
+    }
   } catch (e) {
     mount.textContent = `预览加载失败：${(e as Error).message}`;
     throw e;

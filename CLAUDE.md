@@ -6,7 +6,7 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 
 - [x] **第 1 轮**：`@daf/report-runtime`（内核 + P0 模块 + 渲染器）、`@daf-materials/kit`（antd + VChart/VTable 首批物料）。26 个单测通过。
 - [x] **第 2 轮**：template-report（周报 schema + TrendBlock + 纯函数）、report-scripts（真 esbuild 构建/vendor 共享依赖/声明一致性 lint/manifest 派生/CLI）、mock-server（node:http 零依赖：DAF 查询 + 预览 HTML + 产物静态服务）。浏览器 `pnpm dev` 打开周报，切区域筛选图表联动刷新（声明性，零构建）。34 个单测通过。
-- [ ] **第 3 轮**：host 工作台 + Bridge + 可视编排 + schema 直更新
+- [x] **第 3 轮**：designtime-sdk（Bridge postMessage JSON-RPC：token 握手 + enable/highlight/getSchema/getSelection/onSelect/runtime.action/theme.sync/schema.reload）、host 工作台（Vite+antd 三栏：对话占位/预览 iframe/可视编排三投影 tab + materialMetas 属性面板）、schema 直更新管线（PUT /api/schema 写盘存版本 → Bridge schema.reload → runtime 重建，实测 317ms 零构建）。42 个单测通过。
 - [ ] **第 4 轮**：标注选区 + 布局拖拽 + 物料拖入 + 双 diff
 - [ ] **第 5 轮**：mock Agent 对话 + 真 esbuild 沙箱构建 + 时间线撤销
 
@@ -88,8 +88,9 @@ apps/host                 搭建工作台: 对话/画布/可视编排/物料/双
 
 ```bash
 pnpm install
-pnpm test            # runtime 纯逻辑单测（零依赖直跑）
-pnpm dev             # 第2轮起：mock-server + 预览/host（concurrently 或 node 脚本）
-pnpm lint:report     # 第2轮起：对 template-report 跑声明一致性 lint
-pnpm build:report    # 第2轮起：esbuild 构建产物
+pnpm test            # 全部单测（node:test 直跑 TS，零依赖）
+pnpm dev             # mock-server(5173) + host 工作台(5174)；预览直连 5173/preview/
+pnpm dev:server      # 只起 mock-server（注意：读 MOCK_PORT 不读 PORT，避免启动器注入冲突）
+pnpm lint:report     # 对 template-report 跑声明一致性 lint
+pnpm build:report    # esbuild 构建报告产物（dist/）
 ```

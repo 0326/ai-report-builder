@@ -1,6 +1,8 @@
 /**
  * mock-server（node:http 零依赖）：
  * - POST /api/daf/query        按 datasetId 返回 fixtures（region 过滤 + 100-300ms 延迟）
+ * - GET  /api/schema           当前源 schema（host 可视编排的数据源）
+ * - PUT  /api/schema           schema 直更新：写盘存新版本（零构建），返回新 schemaUrl
  * - GET  /preview/             预览 HTML（import-map 指向 vendor 产物 + 注入 __PREVIEW__）
  * - GET  /artifacts/*          产物静态服务（vendor / preview / report bundle+schema+manifest）
  * 启动时跑一次全量构建（真 esbuild），产物落 .artifacts/。
@@ -10,14 +12,15 @@ import { readFile, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join, resolve, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildAll, IMPORT_MAP } from '@daf/report-scripts';
+import { buildAll, IMPORT_MAP, readSchema } from '@daf/report-scripts';
 import { queryDataset, KNOWN_DATASETS } from './fixtures.ts';
+import { saveSchema } from './schema-store.ts';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url)); // packages/mock-server/src/
 const REPO_ROOT = resolve(HERE, '../../..');
 const ARTIFACTS_DIR = join(REPO_ROOT, '.artifacts');
 const PROJECT_DIR = join(REPO_ROOT, 'apps/template-report');
-const PORT = Number(process.env.PORT ?? 5173);
+const PORT = Number(process.env.MOCK_PORT ?? 5173); // 不读 PORT：避免外层启动器注入冲突
 
 const MIME: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -110,11 +113,32 @@ async function handleQuery(req: import('node:http').IncomingMessage, res: import
   send(res, 200, JSON.stringify({ rows, total: rows.length }), MIME['.json']);
 }
 
+async function handleSchemaPut(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+  let schema: unknown;
+  try {
+    schema = JSON.parse((await readBody(req)) || 'null');
+  } catch {
+    return send(res, 400, JSON.stringify({ error: 'invalid json' }), MIME['.json']);
+  }
+  try {
+    const t0 = Date.now();
+    const r = saveSchema(PROJECT_DIR, ARTIFACTS_DIR, schema as never);
+    console.log(`  ✓ schema 直更新 → ${r.schemaFile}（零构建，${Date.now() - t0}ms）`);
+    send(res, 200, JSON.stringify(r), MIME['.json']);
+  } catch (e) {
+    send(res, 400, JSON.stringify({ error: (e as Error).message }), MIME['.json']);
+  }
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const path = url.pathname;
 
   if (req.method === 'POST' && path === '/api/daf/query') return void handleQuery(req, res);
+  if (req.method === 'GET' && path === '/api/schema') {
+    return send(res, 200, JSON.stringify(readSchema(PROJECT_DIR)), MIME['.json']);
+  }
+  if (req.method === 'PUT' && path === '/api/schema') return void handleSchemaPut(req, res);
   if (req.method === 'GET' && path.startsWith('/artifacts/')) return void serveArtifact(res, path);
   if (req.method === 'GET' && (path === '/' || path === '/preview' || path === '/preview/')) {
     return send(res, 200, previewHtml(), MIME['.html']);

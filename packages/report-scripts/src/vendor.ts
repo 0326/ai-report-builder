@@ -22,6 +22,7 @@ export const IMPORT_MAP = {
   'react-dom/client': '/artifacts/vendor/react-dom-client.js',
   '@daf/report-runtime': '/artifacts/vendor/report-runtime.js',
   '@daf-materials/kit': '/artifacts/vendor/materials.js',
+  '@daf/designtime-sdk': '/artifacts/vendor/designtime-sdk.js',
 };
 
 const PROD = { 'process.env.NODE_ENV': '"production"' };
@@ -74,6 +75,7 @@ const VENDOR_ENTRIES: Record<string, string> = {
   'react-dom-client': REACT_DOM_CLIENT_ENTRY,
   'report-runtime': `export * from '@daf/report-runtime';`,
   materials: `export * from '@daf-materials/kit';`,
+  'designtime-sdk': `export * from '@daf/designtime-sdk';`,
 };
 
 export interface VendorBuildResult {

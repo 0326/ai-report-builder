@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "node --test \"packages/report-runtime/test/*.test.ts\" \"packages/report-scripts/test/*.test.ts\" \"apps/template-report/test/*.test.ts\"",
-    "dev": "node packages/mock-server/src/server.ts",
+    "test": "node --test \"packages/report-runtime/test/*.test.ts\" \"packages/report-scripts/test/*.test.ts\" \"packages/designtime-sdk/test/*.test.ts\" \"packages/mock-server/test/*.test.ts\" \"apps/template-report/test/*.test.ts\"",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "node packages/mock-server/src/server.ts",
     "lint:report": "node packages/report-scripts/src/cli.ts lint apps/template-report",
     "build:report": "node packages/report-scripts/src/cli.ts build apps/template-report"
   },
@@ -14,6 +15,7 @@
   },
   "devDependencies": {
     "@daf-materials/kit": "workspace:*",
+    "@daf/designtime-sdk": "workspace:*",
     "@daf/report-runtime": "workspace:*",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
