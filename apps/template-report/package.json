@@ -1,0 +1,19 @@
+{
+  "name": "template-report",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "lint": "node ../../packages/report-scripts/src/cli.ts lint .",
+    "build": "node ../../packages/report-scripts/src/cli.ts build ."
+  },
+  "dependencies": {
+    "@daf/report-runtime": "workspace:*",
+    "@daf-materials/kit": "workspace:*",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0"
+  }
+}

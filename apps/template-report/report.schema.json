@@ -1,0 +1,162 @@
+{
+  "version": "1.0.0",
+  "name": "weekly-biz-report",
+  "componentsMap": [
+    { "componentName": "KPICard", "package": "@daf-materials/kit", "version": "^0.1.0", "exportName": "KPICard" },
+    { "componentName": "PieChart", "package": "@daf-materials/kit", "version": "^0.1.0", "exportName": "PieChart" },
+    { "componentName": "DataTable", "package": "@daf-materials/kit", "version": "^0.1.0", "exportName": "DataTable" },
+    { "componentName": "AIBlock", "package": "@daf/report-runtime", "exportName": "AIBlock" }
+  ],
+  "componentsTree": [
+    {
+      "componentName": "Page",
+      "props": { "title": "周度经营报告" },
+      "x-layout": { "mode": "grid", "cols": 12 },
+      "state": { "f_region": "all" },
+      "dataSource": {
+        "list": [
+          {
+            "id": "ds_summary",
+            "type": "daf-query",
+            "options": {
+              "datasetId": "metric_summary",
+              "fields": ["dau", "newUser", "revenue"],
+              "params": { "region": { "type": "JSExpression", "value": "this.state.f_region" } }
+            },
+            "x-trigger": "auto"
+          },
+          {
+            "id": "ds_dau",
+            "type": "daf-query",
+            "options": {
+              "datasetId": "metric_dau",
+              "fields": ["date", "dau"],
+              "params": { "region": { "type": "JSExpression", "value": "this.state.f_region" } }
+            },
+            "x-trigger": "auto"
+          },
+          {
+            "id": "ds_channel",
+            "type": "daf-query",
+            "options": {
+              "datasetId": "metric_channel",
+              "fields": ["channel", "uv"],
+              "params": { "region": { "type": "JSExpression", "value": "this.state.f_region" } }
+            },
+            "x-trigger": "auto"
+          },
+          {
+            "id": "ds_detail",
+            "type": "daf-query",
+            "options": {
+              "datasetId": "metric_detail",
+              "fields": ["date", "channel", "uv", "dau"],
+              "params": { "region": { "type": "JSExpression", "value": "this.state.f_region" } }
+            },
+            "x-trigger": "auto"
+          }
+        ]
+      },
+      "x-filters": [
+        {
+          "id": "f_region",
+          "label": "区域",
+          "stateKey": "f_region",
+          "valueType": "enum",
+          "default": "all",
+          "options": [
+            { "label": "全部", "value": "all" },
+            { "label": "App", "value": "app" },
+            { "label": "Web", "value": "web" },
+            { "label": "小程序", "value": "mini" }
+          ]
+        }
+      ],
+      "x-linkages": [
+        { "id": "lk1", "source": "node_channel.click", "action": "setState", "target": "f_region", "mapping": "payload.name" },
+        { "id": "lk2", "source": "node_trend.drill", "action": "custom", "handler": "src/blocks/TrendBlock#onDrill" }
+      ],
+      "children": [
+        {
+          "id": "node_kpi_dau",
+          "componentName": "KPICard",
+          "title": "DAU",
+          "props": {
+            "data": { "type": "JSExpression", "value": "this.dataSourceMap['ds_summary'].data" },
+            "field": "dau"
+          },
+          "x-position": { "x": 0, "y": 0, "w": 4, "h": 3 },
+          "x-consumes": ["ds_summary"],
+          "x-listens": ["f_region"]
+        },
+        {
+          "id": "node_kpi_new",
+          "componentName": "KPICard",
+          "title": "新增用户",
+          "props": {
+            "data": { "type": "JSExpression", "value": "this.dataSourceMap['ds_summary'].data" },
+            "field": "newUser"
+          },
+          "x-position": { "x": 4, "y": 0, "w": 4, "h": 3 },
+          "x-consumes": ["ds_summary"],
+          "x-listens": ["f_region"]
+        },
+        {
+          "id": "node_kpi_rev",
+          "componentName": "KPICard",
+          "title": "营收",
+          "props": {
+            "data": { "type": "JSExpression", "value": "this.dataSourceMap['ds_summary'].data" },
+            "field": "revenue",
+            "prefix": "¥"
+          },
+          "x-position": { "x": 8, "y": 0, "w": 4, "h": 3 },
+          "x-consumes": ["ds_summary"],
+          "x-listens": ["f_region"]
+        },
+        {
+          "id": "node_trend",
+          "componentName": "AIBlock",
+          "title": "DAU 趋势",
+          "props": { "entry": "blocks/TrendBlock", "smooth": true },
+          "x-position": { "x": 0, "y": 3, "w": 8, "h": 6 },
+          "x-consumes": ["ds_dau"],
+          "x-listens": ["f_region"],
+          "x-emits": ["drill"]
+        },
+        {
+          "id": "node_channel",
+          "componentName": "PieChart",
+          "title": "渠道占比",
+          "props": {
+            "donut": false,
+            "categoryField": "channel",
+            "valueField": "uv",
+            "data": { "type": "JSExpression", "value": "this.dataSourceMap['ds_channel'].data" }
+          },
+          "x-position": { "x": 8, "y": 3, "w": 4, "h": 6 },
+          "x-consumes": ["ds_channel"],
+          "x-listens": ["f_region"],
+          "x-emits": ["click"]
+        },
+        {
+          "id": "node_detail",
+          "componentName": "DataTable",
+          "title": "渠道明细",
+          "props": {
+            "data": { "type": "JSExpression", "value": "this.dataSourceMap['ds_detail'].data" },
+            "columns": [
+              { "field": "date", "title": "日期" },
+              { "field": "channel", "title": "渠道" },
+              { "field": "uv", "title": "UV" },
+              { "field": "dau", "title": "DAU" }
+            ]
+          },
+          "x-position": { "x": 0, "y": 9, "w": 12, "h": 7 },
+          "x-consumes": ["ds_detail"],
+          "x-listens": ["f_region"]
+        }
+      ]
+    }
+  ]
+}

@@ -4,14 +4,21 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "node --test \"packages/report-runtime/test/*.test.ts\"",
-    "dev": "echo '第2轮后可用: pnpm dev 启动 mock-server + host'",
-    "build:report": "pnpm --filter template-report build"
+    "test": "node --test \"packages/report-runtime/test/*.test.ts\" \"packages/report-scripts/test/*.test.ts\" \"apps/template-report/test/*.test.ts\"",
+    "dev": "node packages/mock-server/src/server.ts",
+    "lint:report": "node packages/report-scripts/src/cli.ts lint apps/template-report",
+    "build:report": "node packages/report-scripts/src/cli.ts build apps/template-report"
   },
   "engines": {
     "node": ">=22.18"
   },
   "devDependencies": {
+    "@daf-materials/kit": "workspace:*",
+    "@daf/report-runtime": "workspace:*",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
     "typescript": "^5.6.0"
   }
 }

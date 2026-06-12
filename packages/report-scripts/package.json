@@ -1,0 +1,14 @@
+{
+  "name": "@daf/report-scripts",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "bin": { "report-scripts": "./src/cli.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@daf/report-runtime": "workspace:*",
+    "esbuild": "^0.25.0"
+  }
+}

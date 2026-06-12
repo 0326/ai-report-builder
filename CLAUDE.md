@@ -5,7 +5,7 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 ## 当前进度
 
 - [x] **第 1 轮**：`@daf/report-runtime`（内核 + P0 模块 + 渲染器）、`@daf-materials/kit`（antd + VChart/VTable 首批物料）。26 个单测通过。
-- [ ] **第 2 轮**：template-report + report-scripts + mock-server → 浏览器可打开预览页
+- [x] **第 2 轮**：template-report（周报 schema + TrendBlock + 纯函数）、report-scripts（真 esbuild 构建/vendor 共享依赖/声明一致性 lint/manifest 派生/CLI）、mock-server（node:http 零依赖：DAF 查询 + 预览 HTML + 产物静态服务）。浏览器 `pnpm dev` 打开周报，切区域筛选图表联动刷新（声明性，零构建）。34 个单测通过。
 - [ ] **第 3 轮**：host 工作台 + Bridge + 可视编排 + schema 直更新
 - [ ] **第 4 轮**：标注选区 + 布局拖拽 + 物料拖入 + 双 diff
 - [ ] **第 5 轮**：mock Agent 对话 + 真 esbuild 沙箱构建 + 时间线撤销
