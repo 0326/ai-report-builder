@@ -8,7 +8,7 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 - [x] **第 2 轮**：template-report（周报 schema + TrendBlock + 纯函数）、report-scripts（真 esbuild 构建/vendor 共享依赖/声明一致性 lint/manifest 派生/CLI）、mock-server（node:http 零依赖：DAF 查询 + 预览 HTML + 产物静态服务）。浏览器 `pnpm dev` 打开周报，切区域筛选图表联动刷新（声明性，零构建）。34 个单测通过。
 - [x] **第 3 轮**：designtime-sdk（Bridge postMessage JSON-RPC：token 握手 + enable/highlight/getSchema/getSelection/onSelect/runtime.action/theme.sync/schema.reload）、host 工作台（Vite+antd 三栏：对话占位/预览 iframe/可视编排三投影 tab + materialMetas 属性面板）、schema 直更新管线（PUT /api/schema 写盘存版本 → Bridge schema.reload → runtime 重建，实测 317ms 零构建）。42 个单测通过。
 - [x] **第 4 轮（用户指令重构）**：搭建态切换到 **lowcode-engine**。host = LCE 设计器壳（react16 UMD + Fusion Next + engine-core/ext 全本地化，零 CDN）+ 自研插件（editor-init / setters-registry / save-and-preview / chat-pane 占位）+ 官方 components-pane；物料 assets 从 materialMetas 派生（packages UMD + componentMeta + setters + snippets，`/api/lce/assets`）；schema 经 mergeXFields 保真合并后走原 PUT 直更新管线（浏览器实测：donut 改动落盘 + 全部 x- 字段不丢，17ms 零构建）。45 个单测通过。
-- [ ] **第 5 轮**：mock Agent 对话 + 真 esbuild 沙箱构建 + 双 diff + 时间线撤销 + 标注选区（designtime-sdk overlay 已有基础，接入真实预览链路）
+- [x] **第 5 轮**：报告工程 = 一个 git 沙箱工作区（`.artifacts/sandbox/project`，与主仓库隔离），一切修改落成 commit、产物按 commit hash 缓存。mock Agent 三剧本（关键词匹配→固定响应+过程卡）：① 空白基线 "做周报" → 全量 schema+TrendBlock 代码 → 真 esbuild 构建；② 选区 "改环形+联动" → 纯 schema patch（对齐附录 A）→ 零构建直更新；③ "加留存漏斗块" → 首版裸 fetch 被 lint 拦截 → 自修复改用 runtime.data 重试（≤2 次）。双 diff（schemaDiff jsondiffpatch 风格 + codeDiff 行级 LCS）、版本时间线（git log）、回滚切产物 URL（秒级零重建）。host 新增 对话/时间线/运行态预览 三面板 + 选区上下文链路，editor-init 冷启动重试容错。浏览器实测：空白→①②③ 端到端跑通，运行态预览渲染含漏斗块的完整周报（真实数据）。55 个单测通过（+10）。
 
 每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
 

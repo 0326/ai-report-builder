@@ -9,6 +9,7 @@ import type { IPublicModelPluginContext } from '@alilc/lowcode-types';
 import type { ReportSchema } from '@daf/report-runtime/core';
 import { mergeXFields } from '@daf/designtime-sdk';
 import { getBaseline, setBaseline } from '../store.ts';
+import { emitPreview, emitTimeline } from '../bus.ts';
 
 async function doSave(ctx: IPublicModelPluginContext): Promise<boolean> {
   try {
@@ -23,7 +24,13 @@ async function doSave(ctx: IPublicModelPluginContext): Promise<boolean> {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `PUT ${res.status}`);
     setBaseline(merged);
-    Message.success(`已保存 schema.${body.hash}（零构建直更新，${Math.round(performance.now() - t0)}ms）`);
+    if (body.previewUrl) emitPreview(body.previewUrl);
+    emitTimeline();
+    Message.success(
+      body.unchanged
+        ? '无改动，未产生新版本'
+        : `已保存 round(${body.round})（零构建直更新，${Math.round(performance.now() - t0)}ms）`,
+    );
     return true;
   } catch (e) {
     Message.error(`保存失败：${(e as Error).message}`);

@@ -1,27 +1,43 @@
 /**
- * mock-server（node:http 零依赖）：
- * - POST /api/daf/query        按 datasetId 返回 fixtures（region 过滤 + 100-300ms 延迟）
- * - GET  /api/schema           当前源 schema（host 可视编排的数据源）
- * - PUT  /api/schema           schema 直更新：写盘存新版本（零构建），返回新 schemaUrl
- * - GET  /preview/             预览 HTML（import-map 指向 vendor 产物 + 注入 __PREVIEW__）
- * - GET  /artifacts/*          产物静态服务（vendor / preview / report bundle+schema+manifest）
- * 启动时跑一次全量构建（真 esbuild），产物落 .artifacts/。
+ * mock-server（node:http 零依赖）。第 5 轮起报告工程 = 一个 git 沙箱工作区（Sandbox），
+ * 一切修改（Agent / 可视编排保存 / 拖拽）都落成 commit，产物按 commit hash 缓存。
+ *
+ * - POST /api/daf/query        按 datasetId 返回 fixtures（region/channel 过滤 + 100-300ms 延迟）
+ * - GET  /api/schema           当前工作区 schema（设计器导入源）
+ * - PUT  /api/schema           可视编排保存：写沙箱 + 零构建直更新 + commit，返回新预览 URL
+ * - POST /api/agent/chat       对话搭建（链路一）：意图匹配 → 落盘 → lint/构建（自修复）→ commit → 双 diff
+ * - GET  /api/timeline         版本时间线（git log + 当前指针 + 产物可用性）
+ * - POST /api/timeline/checkout 回滚到某 commit 的产物（秒级切 URL）
+ * - GET  /api/lce/assets       LCE 物料 assets（materialMetas 派生）
+ * - GET  /preview/?build=<h>   预览 HTML（指定 commit 产物；缺省取当前指针）
+ * - GET  /artifacts/*          产物静态服务（vendor / preview harness / sandbox builds）
  */
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join, resolve, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildAll, IMPORT_MAP, readSchema, deriveLceAssets } from '@daf/report-scripts';
+import { buildVendor, buildLceBundles, IMPORT_MAP, deriveLceAssets } from '@daf/report-scripts';
 import { materialMetas } from '@daf-materials/kit/meta';
 import { queryDataset, KNOWN_DATASETS } from './fixtures.ts';
-import { saveSchema } from './schema-store.ts';
+import { validateSchema } from './schema-store.ts';
+import { Sandbox } from './sandbox.ts';
+import { seedFiles } from './agent-scripts.ts';
+import { runAgentTurn } from './agent.ts';
+import type { ReportSchema } from '@daf/report-runtime/core';
 
-const HERE = fileURLToPath(new URL('.', import.meta.url)); // packages/mock-server/src/
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 const ARTIFACTS_DIR = join(REPO_ROOT, '.artifacts');
-const PROJECT_DIR = join(REPO_ROOT, 'apps/template-report');
-const PORT = Number(process.env.MOCK_PORT ?? 5173); // 不读 PORT：避免外层启动器注入冲突
+const FIXTURES_DIR = join(REPO_ROOT, 'packages/mock-server/fixtures/weekly-report');
+const PORT = Number(process.env.MOCK_PORT ?? 5173);
+
+const sandbox = new Sandbox({
+  work: join(ARTIFACTS_DIR, 'sandbox/project'),
+  builds: join(ARTIFACTS_DIR, 'sandbox/builds'),
+});
+/** 当前预览指针（缺省 build）；Agent / PUT 推进，回滚不动它。 */
+let currentHead = '';
 
 const MIME: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -34,23 +50,18 @@ const MIME: Record<string, string> = {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function readManifest(): { schema: string; bundle: string } {
-  const m = JSON.parse(readFileSync(join(ARTIFACTS_DIR, 'report/manifest.json'), 'utf8'));
-  // manifest.artifact.{schema,bundle} 形如 "./schema.<hash>.json"
-  return {
-    schema: String(m.artifact.schema).replace(/^\.\//, ''),
-    bundle: String(m.artifact.bundle).replace(/^\.\//, ''),
-  };
-}
-
-function previewHtml(): string {
-  const { schema, bundle } = readManifest();
+function previewHtml(buildId: string): string {
+  const dir = sandbox.buildDir(buildId);
+  const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+  const schema = String(m.artifact.schema).replace(/^\.\//, '');
+  const bundle = String(m.artifact.bundle).replace(/^\.\//, '');
+  const base = `/artifacts/sandbox/builds/${buildId}`;
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>报告预览 · 周度经营报告</title>
+<title>报告预览 · ${(m.name as string) ?? 'report'}</title>
 <script type="importmap">${JSON.stringify({ imports: IMPORT_MAP })}</script>
 <style>
   html, body, #root { height: 100%; margin: 0; }
@@ -63,8 +74,8 @@ function previewHtml(): string {
 <div id="root"><div class="boot">报告加载中…</div></div>
 <script>
   window.__PREVIEW__ = {
-    schemaUrl: '/artifacts/report/${schema}',
-    bundleUrl: '/artifacts/report/${bundle}',
+    schemaUrl: '${base}/${schema}',
+    bundleUrl: '${base}/${bundle}',
     apiBase: ''
   };
 </script>
@@ -78,10 +89,17 @@ function send(res: import('node:http').ServerResponse, status: number, body: str
   res.end(body);
 }
 
+const sendJson = (res: import('node:http').ServerResponse, status: number, obj: unknown) =>
+  send(res, status, JSON.stringify(obj), MIME['.json']);
+
 async function readBody(req: import('node:http').IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
   return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readJson<T>(req: import('node:http').IncomingMessage): Promise<T> {
+  return JSON.parse((await readBody(req)) || 'null') as T;
 }
 
 async function serveArtifact(res: import('node:http').ServerResponse, urlPath: string) {
@@ -103,64 +121,140 @@ async function handleQuery(req: import('node:http').IncomingMessage, res: import
   try {
     payload = JSON.parse((await readBody(req)) || '{}');
   } catch {
-    return send(res, 400, JSON.stringify({ error: 'invalid json' }), MIME['.json']);
+    return sendJson(res, 400, { error: 'invalid json' });
   }
   const datasetId = payload.datasetId ?? '';
   if (!KNOWN_DATASETS.includes(datasetId)) {
-    return send(res, 404, JSON.stringify({ error: `unknown datasetId: ${datasetId}` }), MIME['.json']);
+    return sendJson(res, 404, { error: `unknown datasetId: ${datasetId}` });
   }
-  await delay(100 + Math.floor(Math.random() * 200)); // 100–300ms
+  await delay(100 + Math.floor(Math.random() * 200));
   const rows = queryDataset(datasetId, payload.params ?? {});
-  send(res, 200, JSON.stringify({ rows, total: rows.length }), MIME['.json']);
+  sendJson(res, 200, { rows, total: rows.length });
 }
 
+/** PUT /api/schema：可视编排/拖拽保存 = 写沙箱 + 零构建直更新 + commit。 */
 async function handleSchemaPut(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
-  let schema: unknown;
+  let schema: ReportSchema;
   try {
-    schema = JSON.parse((await readBody(req)) || 'null');
-  } catch {
-    return send(res, 400, JSON.stringify({ error: 'invalid json' }), MIME['.json']);
+    schema = await readJson<ReportSchema>(req);
+    validateSchema(schema);
+  } catch (e) {
+    return sendJson(res, 400, { error: (e as Error).message });
   }
   try {
     const t0 = Date.now();
-    const r = saveSchema(PROJECT_DIR, ARTIFACTS_DIR, schema as never);
-    console.log(`  ✓ schema 直更新 → ${r.schemaFile}（零构建，${Date.now() - t0}ms）`);
-    send(res, 200, JSON.stringify(r), MIME['.json']);
+    const prevHead = currentHead;
+    sandbox.writeSchema(schema);
+    if (!sandbox.isDirty()) {
+      return sendJson(res, 200, { ...sandbox.pointer(prevHead), unchanged: true });
+    }
+    const round = sandbox.log().length;
+    const hash = sandbox.commit(`round(${round}): 可视编排保存 | packages: sandbox | type: schema`);
+    const pointer = await sandbox.build(hash, 'schema', prevHead);
+    currentHead = hash;
+    console.log(`  ✓ schema 直更新 → ${hash.slice(0, 8)}（零构建，${Date.now() - t0}ms）`);
+    sendJson(res, 200, { ...pointer, round, ms: Date.now() - t0 });
   } catch (e) {
-    send(res, 400, JSON.stringify({ error: (e as Error).message }), MIME['.json']);
+    sandbox.reset();
+    sendJson(res, 400, { error: (e as Error).message });
+  }
+}
+
+async function handleAgentChat(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+  let body: { message?: string; selection?: unknown };
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 400, { error: 'invalid json' });
+  }
+  if (!body?.message) return sendJson(res, 400, { error: '缺少 message' });
+  try {
+    const result = await runAgentTurn(sandbox, FIXTURES_DIR, { message: body.message, selection: body.selection as never });
+    if (result.ok && result.commit) {
+      currentHead = result.commit.hash;
+      console.log(`  ✓ Agent ${result.intent} → ${result.commit.hash.slice(0, 8)}（${result.pipeline}, ${result.buildMs ?? 0}ms）`);
+    }
+    sendJson(res, 200, result);
+  } catch (e) {
+    sandbox.reset();
+    sendJson(res, 500, { error: (e as Error).message });
+  }
+}
+
+function handleTimeline(res: import('node:http').ServerResponse) {
+  const nodes = sandbox.log().map((c) => ({
+    hash: c.hash,
+    short: c.hash.slice(0, 8),
+    round: c.round,
+    intent: c.intent,
+    type: c.type,
+    hasBuild: sandbox.hasBuild(c.hash),
+    current: c.hash === currentHead,
+  }));
+  sendJson(res, 200, { nodes, head: currentHead });
+}
+
+async function handleCheckout(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+  let body: { hash?: string };
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 400, { error: 'invalid json' });
+  }
+  if (!body?.hash) return sendJson(res, 400, { error: '缺少 hash' });
+  try {
+    const t0 = Date.now();
+    const pointer = await sandbox.rollbackTo(body.hash);
+    console.log(`  ↩ 回滚预览 → ${pointer.hash.slice(0, 8)}（切 URL，${Date.now() - t0}ms）`);
+    sendJson(res, 200, { ...pointer, ms: Date.now() - t0 });
+  } catch (e) {
+    sendJson(res, 400, { error: (e as Error).message });
   }
 }
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const path = url.pathname;
+  const m = req.method;
 
-  if (req.method === 'POST' && path === '/api/daf/query') return void handleQuery(req, res);
-  if (req.method === 'GET' && path === '/api/schema') {
-    return send(res, 200, JSON.stringify(readSchema(PROJECT_DIR)), MIME['.json']);
-  }
-  if (req.method === 'GET' && path === '/api/lce/assets') {
+  if (m === 'POST' && path === '/api/daf/query') return void handleQuery(req, res);
+  if (m === 'GET' && path === '/api/schema') return sendJson(res, 200, sandbox.readSchema());
+  if (m === 'PUT' && path === '/api/schema') return void handleSchemaPut(req, res);
+  if (m === 'POST' && path === '/api/agent/chat') return void handleAgentChat(req, res);
+  if (m === 'GET' && path === '/api/timeline') return handleTimeline(res);
+  if (m === 'POST' && path === '/api/timeline/checkout') return void handleCheckout(req, res);
+  if (m === 'GET' && path === '/api/lce/assets') {
     const assets = deriveLceAssets(materialMetas, {
       materialsUrl: '/artifacts/lce/materials.umd.js',
       runtimeDesignUrl: '/artifacts/lce/runtime-design.umd.js',
     });
-    return send(res, 200, JSON.stringify(assets), MIME['.json']);
+    return sendJson(res, 200, assets);
   }
-  if (req.method === 'PUT' && path === '/api/schema') return void handleSchemaPut(req, res);
-  if (req.method === 'GET' && path.startsWith('/artifacts/')) return void serveArtifact(res, path);
-  if (req.method === 'GET' && (path === '/' || path === '/preview' || path === '/preview/')) {
-    return send(res, 200, previewHtml(), MIME['.html']);
+  if (m === 'GET' && path.startsWith('/artifacts/')) return void serveArtifact(res, path);
+  if (m === 'GET' && (path === '/' || path === '/preview' || path === '/preview/')) {
+    const buildId = url.searchParams.get('build') || currentHead;
+    if (!sandbox.hasBuild(buildId)) return send(res, 404, `无此版本产物: ${buildId}`);
+    return send(res, 200, previewHtml(buildId), MIME['.html']);
   }
-  send(res, 404, `not found: ${req.method} ${path}`);
+  send(res, 404, `not found: ${m} ${path}`);
 });
 
 async function main() {
-  console.log('› 构建产物（真 esbuild）…');
+  console.log('› 构建共享依赖 vendor + 预览 harness + LCE 物料 UMD（真 esbuild）…');
   const t0 = Date.now();
-  const r = await buildAll(PROJECT_DIR, ARTIFACTS_DIR);
-  console.log(`  ✓ 报告 ${r.report.bundleFile} · vendor ${Object.keys(r.vendor.bytes).length} 个 · ${Date.now() - t0}ms`);
+  await buildVendor(ARTIFACTS_DIR);
+  await buildLceBundles(ARTIFACTS_DIR);
+  console.log(`  ✓ vendor/preview/lce 就绪（${Date.now() - t0}ms）`);
+
+  console.log('› 初始化报告工程沙箱（git 工作区 + 空白基线）…');
+  const t1 = Date.now();
+  const base = await sandbox.init(seedFiles());
+  currentHead = base.hash;
+  console.log(`  ✓ 沙箱基线 ${base.hash.slice(0, 8)}（${Date.now() - t1}ms）`);
+
   server.listen(PORT, () => {
-    console.log(`\n  报告预览  →  http://localhost:${PORT}/preview/\n`);
+    console.log(`\n  报告预览  →  http://localhost:${PORT}/preview/`);
+    console.log(`  对话搭建从空白基线开始，试试：「做一份周报：DAU 趋势 + 渠道占比，按区域筛选」\n`);
   });
 }
 

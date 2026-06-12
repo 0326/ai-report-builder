@@ -21,6 +21,23 @@ const CHANNELS: Array<{ channel: string; uv: number }> = [
   { channel: 'other', uv: 1300 },
 ];
 
+// 渠道在总 UV 中的占比（metric_dau 按选中渠道缩放，演示"点击渠道 → 趋势只看该渠道"）
+const CHANNEL_SHARE: Record<string, number> = { app: 0.505, web: 0.28, mini: 0.143, other: 0.071 };
+
+function channelFactor(channel: unknown): number {
+  const c = typeof channel === 'string' ? channel : 'all';
+  return c === 'all' ? 1 : CHANNEL_SHARE[c] ?? 1;
+}
+
+// 留存漏斗各环节人数（按 region 缩放）
+const RETENTION: Array<{ stage: string; users: number }> = [
+  { stage: '访问', users: 16240 },
+  { stage: '注册', users: 8420 },
+  { stage: '激活', users: 5310 },
+  { stage: '7日留存', users: 2980 },
+  { stage: '付费', users: 1120 },
+];
+
 const round = (n: number) => Math.round(n);
 
 export function queryDataset(datasetId: string, params: Record<string, unknown>): Row[] {
@@ -34,8 +51,13 @@ export function queryDataset(datasetId: string, params: Record<string, unknown>)
         revenue: round(184500 * f),
       }];
 
-    case 'metric_dau':
-      return DATES.map((date, i) => ({ date, dau: round(BASE_DAU[i] * f) }));
+    case 'metric_dau': {
+      const cf = channelFactor(params.channel);
+      return DATES.map((date, i) => ({ date, dau: round(BASE_DAU[i] * f * cf) }));
+    }
+
+    case 'metric_retention':
+      return RETENTION.map((r) => ({ stage: r.stage, users: round(r.users * f) }));
 
     case 'metric_channel':
       return CHANNELS.map((c) => ({ channel: c.channel, uv: round(c.uv * f) }));
@@ -55,4 +77,4 @@ export function queryDataset(datasetId: string, params: Record<string, unknown>)
   }
 }
 
-export const KNOWN_DATASETS = ['metric_summary', 'metric_dau', 'metric_channel', 'metric_detail'];
+export const KNOWN_DATASETS = ['metric_summary', 'metric_dau', 'metric_channel', 'metric_detail', 'metric_retention'];
