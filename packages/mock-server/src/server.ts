@@ -26,26 +26,25 @@ import { toDatasetId } from './csv.ts';
 import { publishReport, listPublished, queryPublished } from './publish.ts';
 import { normalizeDataBindings } from './normalize.ts';
 import { validateSchema } from './schema-store.ts';
-import { Sandbox } from './sandbox.ts';
-import { seedFiles } from './agent-scripts.ts';
 import { runAgentTurn } from './agent.ts';
 import { runLlmTurn, resetSession, type AgentEvent } from './llm-agent.ts';
 import { getLlmConfig, saveLlmRuntimeConfig, resetLlmConfigCache } from './env.ts';
 import type { ReportSchema } from '@daf/report-runtime/core';
 
+import { ReportStore } from './report-store.ts';
+import { relative } from 'node:path';
+
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 const ARTIFACTS_DIR = join(REPO_ROOT, '.artifacts');
 const PUBLISHED_DIR = join(ARTIFACTS_DIR, 'published');
+const SANDBOX_ROOT = join(ARTIFACTS_DIR, 'sandbox');
 const FIXTURES_DIR = join(REPO_ROOT, 'packages/mock-server/fixtures/weekly-report');
 const PORT = Number(process.env.MOCK_PORT ?? 5173);
 
-const sandbox = new Sandbox({
-  work: join(ARTIFACTS_DIR, 'sandbox/project'),
-  builds: join(ARTIFACTS_DIR, 'sandbox/builds'),
-});
-/** 当前预览指针（缺省 build）；Agent / PUT 推进，回滚不动它。 */
-let currentHead = '';
+/** 多报告：每报告独立 git 沙箱 + 产物；所有链路作用于当前报告。 */
+const store = new ReportStore(SANDBOX_ROOT);
+const cur = () => store.current();
 
 const MIME: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -89,10 +88,11 @@ function renderHtml(opts: { title: string; base: string; schema: string; bundle:
 }
 
 function previewHtml(buildId: string): string {
-  const m = JSON.parse(readFileSync(join(sandbox.buildDir(buildId), 'manifest.json'), 'utf8'));
+  const dir = cur().sandbox.buildDir(buildId);
+  const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
   return renderHtml({
     title: `报告预览 · ${(m.name as string) ?? 'report'}`,
-    base: `/artifacts/sandbox/builds/${buildId}`,
+    base: `/artifacts/${relative(ARTIFACTS_DIR, dir)}`,
     schema: String(m.artifact.schema).replace(/^\.\//, ''),
     bundle: String(m.artifact.bundle).replace(/^\.\//, ''),
     queryUrl: '/api/daf/query',
@@ -203,6 +203,15 @@ async function handleDatasetUpload(req: import('node:http').IncomingMessage, res
   }
 }
 
+/** POST /api/reports：新建空白报告并切为当前。 */
+async function handleReportCreate(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+  let body: { title?: string };
+  try { body = (await readJson(req)) ?? {}; } catch { body = {}; }
+  const r = await store.create((body.title ?? '').slice(0, 60) || '未命名报告');
+  console.log(`  ✓ 新建报告 ${r.meta.id}「${r.meta.title}」`);
+  sendJson(res, 200, { id: r.meta.id, title: r.meta.title });
+}
+
 /** POST /api/publish：冻结当前报告为可分享产物（bundle+schema+上传数据快照）。 */
 async function handlePublish(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   let body: { title?: string };
@@ -212,13 +221,14 @@ async function handlePublish(req: import('node:http').IncomingMessage, res: impo
     body = {};
   }
   try {
-    if (!sandbox.hasBuild(currentHead)) return sendJson(res, 400, { error: '当前报告尚未构建' });
+    const { sandbox, head, meta } = cur();
+    if (!sandbox.hasBuild(head)) return sendJson(res, 400, { error: '当前报告尚未构建' });
     const schema = sandbox.readSchema();
-    const title = body.title || (schema as { name?: string }).name || '未命名报告';
+    const title = body.title || meta.title || (schema as { name?: string }).name || '未命名报告';
     const rec = publishReport({
-      buildDir: sandbox.buildDir(currentHead),
+      buildDir: sandbox.buildDir(head),
       publishedDir: PUBLISHED_DIR,
-      hash: currentHead,
+      hash: head,
       schema,
       title,
       createdAt: Date.now(),
@@ -245,7 +255,9 @@ async function handleSchemaPut(req: import('node:http').IncomingMessage, res: im
   }
   try {
     const t0 = Date.now();
-    const prevHead = currentHead;
+    const c = cur();
+    const sandbox = c.sandbox;
+    const prevHead = c.head;
     sandbox.writeSchema(schema);
     if (!sandbox.isDirty()) {
       return sendJson(res, 200, { ...sandbox.pointer(prevHead), unchanged: true });
@@ -253,11 +265,12 @@ async function handleSchemaPut(req: import('node:http').IncomingMessage, res: im
     const round = sandbox.log().length;
     const hash = sandbox.commit(`round(${round}): 可视编排保存 | packages: sandbox | type: schema`);
     const pointer = await sandbox.build(hash, 'schema', prevHead);
-    currentHead = hash;
+    c.head = hash;
+    store.touch();
     console.log(`  ✓ schema 直更新 → ${hash.slice(0, 8)}（零构建，${Date.now() - t0}ms）`);
     sendJson(res, 200, { ...pointer, round, ms: Date.now() - t0 });
   } catch (e) {
-    sandbox.reset();
+    cur().sandbox.reset();
     sendJson(res, 400, { error: (e as Error).message });
   }
 }
@@ -281,15 +294,18 @@ async function handleAgentChat(req: import('node:http').IncomingMessage, res: im
     connection: 'keep-alive',
   });
   const emit = (ev: AgentEvent) => res.write(`data: ${JSON.stringify(ev)}\n\n`);
+  const c = cur();
+  const sandbox = c.sandbox;
 
   try {
     if (getLlmConfig().enabled) {
       await runLlmTurn(
         sandbox,
-        { sessionId: body.sessionId ?? 'default', message: body.message, selection: body.selection as never },
+        { sessionId: `${c.meta.id}:${body.sessionId ?? 'default'}`, message: body.message, selection: body.selection as never },
         (ev) => {
           if (ev.t === 'round' && ev.result.ok) {
-            currentHead = ev.result.commit.hash;
+            c.head = ev.result.commit.hash;
+            store.touch();
             console.log(`  ✓ Agent(${getLlmConfig().model}) ${ev.result.intent} → ${ev.result.commit.hash.slice(0, 8)}（${ev.result.pipeline}, ${ev.result.buildMs}ms）`);
           }
           emit(ev);
@@ -299,7 +315,8 @@ async function handleAgentChat(req: import('node:http').IncomingMessage, res: im
       // 剧本回落：适配为同一 SSE 事件流
       const result = await runAgentTurn(sandbox, FIXTURES_DIR, { message: body.message, selection: body.selection as never });
       if (result.ok && result.commit) {
-        currentHead = result.commit.hash;
+        c.head = result.commit.hash;
+        store.touch();
         console.log(`  ✓ Agent(剧本) ${result.intent} → ${result.commit.hash.slice(0, 8)}（${result.pipeline}, ${result.buildMs ?? 0}ms）`);
         emit({ t: 'text', delta: result.reply });
         emit({
@@ -327,6 +344,7 @@ async function handleAgentChat(req: import('node:http').IncomingMessage, res: im
 }
 
 function handleTimeline(res: import('node:http').ServerResponse) {
+  const { sandbox, head } = cur();
   const nodes = sandbox.log().map((c) => ({
     hash: c.hash,
     short: c.hash.slice(0, 8),
@@ -334,9 +352,9 @@ function handleTimeline(res: import('node:http').ServerResponse) {
     intent: c.intent,
     type: c.type,
     hasBuild: sandbox.hasBuild(c.hash),
-    current: c.hash === currentHead,
+    current: c.hash === head,
   }));
-  sendJson(res, 200, { nodes, head: currentHead });
+  sendJson(res, 200, { nodes, head });
 }
 
 async function handleCheckout(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
@@ -349,7 +367,7 @@ async function handleCheckout(req: import('node:http').IncomingMessage, res: imp
   if (!body?.hash) return sendJson(res, 400, { error: '缺少 hash' });
   try {
     const t0 = Date.now();
-    const pointer = await sandbox.rollbackTo(body.hash);
+    const pointer = await cur().sandbox.rollbackTo(body.hash);
     console.log(`  ↩ 回滚预览 → ${pointer.hash.slice(0, 8)}（切 URL，${Date.now() - t0}ms）`);
     sendJson(res, 200, { ...pointer, ms: Date.now() - t0 });
   } catch (e) {
@@ -368,11 +386,11 @@ async function handleLlmTest(req: import('node:http').IncomingMessage, res: impo
   } catch {
     return sendJson(res, 400, { error: 'invalid json' });
   }
-  const cur = getLlmConfig();
-  const model = body.model || cur.model;
-  const baseUrl = (body.baseUrl || cur.baseUrl).replace(/\/$/, '');
-  const apiKey = body.apiKey || cur.apiKey;
-  const authToken = body.authToken || cur.authToken;
+  const lc = getLlmConfig();
+  const model = body.model || lc.model;
+  const baseUrl = (body.baseUrl || lc.baseUrl).replace(/\/$/, '');
+  const apiKey = body.apiKey || lc.apiKey;
+  const authToken = body.authToken || lc.authToken;
   if (!apiKey && !authToken) return sendJson(res, 200, { ok: false, error: '未配置 API Key / Token' });
 
   const headers: Record<string, string> = { 'anthropic-version': '2023-06-01' };
@@ -413,7 +431,26 @@ const server = createServer((req, res) => {
     const id = decodeURIComponent(path.slice('/api/datasets/'.length));
     return sendJson(res, 200, { ok: deleteDataset(id) });
   }
-  if (m === 'GET' && path === '/api/schema') return sendJson(res, 200, sandbox.readSchema());
+  if (m === 'GET' && path === '/api/schema') return sendJson(res, 200, cur().sandbox.readSchema());
+  // 多报告管理
+  if (m === 'GET' && path === '/api/reports') return sendJson(res, 200, { reports: store.list() });
+  if (m === 'POST' && path === '/api/reports') return void handleReportCreate(req, res);
+  if (m === 'POST' && /^\/api\/reports\/[^/]+\/open$/.test(path)) {
+    const id = path.split('/')[3];
+    try { store.open(id); return sendJson(res, 200, { ok: true, current: id }); }
+    catch (e) { return sendJson(res, 400, { error: (e as Error).message }); }
+  }
+  if (m === 'PUT' && /^\/api\/reports\/[^/]+$/.test(path)) {
+    const id = path.split('/')[3];
+    return void readJson<{ title?: string }>(req).then((b) => {
+      try { store.rename(id, (b?.title ?? '').slice(0, 60) || '未命名报告'); sendJson(res, 200, { ok: true }); }
+      catch (e) { sendJson(res, 400, { error: (e as Error).message }); }
+    }).catch(() => sendJson(res, 400, { error: 'invalid json' }));
+  }
+  if (m === 'DELETE' && /^\/api\/reports\/[^/]+$/.test(path)) {
+    const id = path.split('/')[3];
+    return void store.remove(id).then(() => sendJson(res, 200, { ok: true, current: store.current().meta.id }));
+  }
   if (m === 'PUT' && path === '/api/schema') return void handleSchemaPut(req, res);
   if (m === 'POST' && path === '/api/agent/chat') return void handleAgentChat(req, res);
   if (m === 'GET' && path === '/api/agent/config') {
@@ -486,8 +523,8 @@ const server = createServer((req, res) => {
   }
   if (m === 'GET' && path.startsWith('/artifacts/')) return void serveArtifact(res, path);
   if (m === 'GET' && (path === '/' || path === '/preview' || path === '/preview/')) {
-    const buildId = url.searchParams.get('build') || currentHead;
-    if (!sandbox.hasBuild(buildId)) return send(res, 404, `无此版本产物: ${buildId}`);
+    const buildId = url.searchParams.get('build') || cur().head;
+    if (!cur().sandbox.hasBuild(buildId)) return send(res, 404, `无此版本产物: ${buildId}`);
     return send(res, 200, previewHtml(buildId), MIME['.html']);
   }
   send(res, 404, `not found: ${m} ${path}`);
@@ -501,11 +538,10 @@ async function main() {
   const chat = await buildChatApp(ARTIFACTS_DIR);
   console.log(`  ✓ vendor/preview/lce/chat 就绪（${Date.now() - t0}ms，chat.js ${(chat.bytes / 1024 / 1024).toFixed(1)}MB）`);
 
-  console.log('› 初始化报告工程沙箱（git 工作区 + 空白基线）…');
+  console.log('› 初始化报告库（多报告 git 工作区）…');
   const t1 = Date.now();
-  const base = await sandbox.init(seedFiles());
-  currentHead = base.hash;
-  console.log(`  ✓ 沙箱基线 ${base.hash.slice(0, 8)}（${Date.now() - t1}ms）`);
+  await store.init();
+  console.log(`  ✓ 报告库就绪：${store.list().length} 个报告，当前「${cur().meta.title}」（${Date.now() - t1}ms）`);
 
   const llm = getLlmConfig();
   server.listen(PORT, () => {

@@ -20,6 +20,8 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 
 - [x] **第 10 轮（可视数据绑定，补全可视编排链路）**：拖物料后可纯可视绑定真实数据（无需 AI/代码/JSON）。`DataBindSetter`（host class 组件，LCE 以 new 实例化故不用 hooks）：选数据集下拉（含上传数据集）+ 字段映射下拉（数据集真实列填充），选数据集时**自动按 维度→类目字段、度量→数值字段** 智能映射。避开 LCE 变量绑定模式的设计：setter 写 plain `props.dataset`=数据集 id，服务端 `normalize.ts` 在 PUT 保存时归一化成 `props.data` JSExpression + 自动补 `x-consumes` + `Page.dataSource.list`（known 校验防脏写、只增不减幂等）；lce-assets 数据绑定 prop 用 DataBindSetter 并把字段映射 prop 折入、不暴露裸 data。81 单测通过（+6）。浏览器实测：空 BarChart→选「季度销售·上传」→自动映射 month/revenue→保存（归一化落 data/dataSource/x-consumes）→预览渲染真实营收柱状图，全程零代码。
 
+- [x] **第 11 轮（多报告管理，商业生产级）**：单工作区 → 多报告。`report-store.ts` `ReportStore`：每报告独立 git 沙箱（`.artifacts/sandbox/<reportId>/`）+ 独立产物缓存 + 注册表持久化（`reports.json`，重启恢复列表与当前指针），支持 新建/切换/重命名/删除（删当前自动切其他、空库建默认）。server 全链路（schema/agent/timeline/publish/preview）改为作用于 `store.current()`，agent session 按报告隔离；新增 `/api/reports` CRUD + open。host 顶栏报告切换器（下拉列表 + 当前标记 + 重命名/删除 + 新建，切换后 reloadDesigner+刷新预览/时间线）。预览 base URL 改为按报告 build 目录相对推导。85 单测通过（+4）。浏览器实测：默认报告→新建「销售月报」自动切换→下拉列出两报告→切回「未命名报告」设计器重载其独立 schema，零 console 错误。
+
 每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
 
 ## 已确认的实现决策（不要改）

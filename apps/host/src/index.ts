@@ -14,6 +14,7 @@ import TimelinePanePlugin from './plugins/timeline-pane.ts';
 import PreviewOverlayPlugin from './plugins/preview-overlay.ts';
 import BrandingPlugin from './plugins/branding.ts';
 import DataPanePlugin from './plugins/data-pane.ts';
+import ReportSwitcherPlugin from './plugins/report-switcher.ts';
 import PublishPlugin from './plugins/publish.ts';
 
 /** daf-query 数据源 → mock-server DAF 查询（画布内真实数据） */
@@ -32,6 +33,7 @@ function createDafQueryHandler() {
 
 async function main() {
   await plugins.register(BrandingPlugin as never);
+  await plugins.register(ReportSwitcherPlugin as never);
   await plugins.register(EditorInitPlugin as never);
   await plugins.register(DefaultSettersRegistryPlugin as never);
   await plugins.register(ComponentsPanePlugin as never);
