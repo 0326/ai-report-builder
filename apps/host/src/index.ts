@@ -13,6 +13,8 @@ import ChatPanePlugin from './plugins/chat-pane.ts';
 import TimelinePanePlugin from './plugins/timeline-pane.ts';
 import PreviewOverlayPlugin from './plugins/preview-overlay.ts';
 import BrandingPlugin from './plugins/branding.ts';
+import DataPanePlugin from './plugins/data-pane.ts';
+import PublishPlugin from './plugins/publish.ts';
 
 /** daf-query 数据源 → mock-server DAF 查询（画布内真实数据） */
 function createDafQueryHandler() {
@@ -35,8 +37,10 @@ async function main() {
   await plugins.register(ComponentsPanePlugin as never);
   await plugins.register(SaveAndPreviewPlugin as never);
   await plugins.register(ChatPanePlugin as never);
+  await plugins.register(DataPanePlugin as never);
   await plugins.register(TimelinePanePlugin as never);
   await plugins.register(PreviewOverlayPlugin as never);
+  await plugins.register(PublishPlugin as never);
 
   await init(document.getElementById('lce-container')!, {
     locale: 'zh-CN',

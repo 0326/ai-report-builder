@@ -77,4 +77,7 @@ export function queryDataset(datasetId: string, params: Record<string, unknown>)
   }
 }
 
-export const KNOWN_DATASETS = ['metric_summary', 'metric_dau', 'metric_channel', 'metric_detail', 'metric_retention'];
+/** 内置示例数据集 id（datasets 注册中心据此路由到 fixtures）。 */
+export const BUILTIN_DATASETS = ['metric_summary', 'metric_dau', 'metric_channel', 'metric_detail', 'metric_retention'];
+/** @deprecated 用 datasets.knownDatasetIds()（含上传数据集）；保留兼容旧引用 */
+export const KNOWN_DATASETS = BUILTIN_DATASETS;

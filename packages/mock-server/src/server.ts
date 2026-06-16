@@ -14,12 +14,16 @@
  */
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildVendor, buildLceBundles, buildChatApp, IMPORT_MAP, deriveLceAssets } from '@daf/report-scripts';
 import { materialMetas } from '@daf-materials/kit/meta';
-import { queryDataset, KNOWN_DATASETS } from './fixtures.ts';
+import {
+  queryDataset, knownDatasetIds, listDatasets, previewDataset, importDataset, deleteDataset,
+} from './datasets.ts';
+import { toDatasetId } from './csv.ts';
+import { publishReport, listPublished, queryPublished } from './publish.ts';
 import { validateSchema } from './schema-store.ts';
 import { Sandbox } from './sandbox.ts';
 import { seedFiles } from './agent-scripts.ts';
@@ -31,6 +35,7 @@ import type { ReportSchema } from '@daf/report-runtime/core';
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 const ARTIFACTS_DIR = join(REPO_ROOT, '.artifacts');
+const PUBLISHED_DIR = join(ARTIFACTS_DIR, 'published');
 const FIXTURES_DIR = join(REPO_ROOT, 'packages/mock-server/fixtures/weekly-report');
 const PORT = Number(process.env.MOCK_PORT ?? 5173);
 
@@ -52,18 +57,13 @@ const MIME: Record<string, string> = {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function previewHtml(buildId: string): string {
-  const dir = sandbox.buildDir(buildId);
-  const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
-  const schema = String(m.artifact.schema).replace(/^\.\//, '');
-  const bundle = String(m.artifact.bundle).replace(/^\.\//, '');
-  const base = `/artifacts/sandbox/builds/${buildId}`;
+function renderHtml(opts: { title: string; base: string; schema: string; bundle: string; queryUrl: string }): string {
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>报告预览 · ${(m.name as string) ?? 'report'}</title>
+<title>${opts.title}</title>
 <script type="importmap">${JSON.stringify({ imports: IMPORT_MAP })}</script>
 <style>
   html, body, #root { height: 100%; margin: 0; }
@@ -76,14 +76,38 @@ function previewHtml(buildId: string): string {
 <div id="root"><div class="boot">报告加载中…</div></div>
 <script>
   window.__PREVIEW__ = {
-    schemaUrl: '${base}/${schema}',
-    bundleUrl: '${base}/${bundle}',
-    apiBase: ''
+    schemaUrl: '${opts.base}/${opts.schema}',
+    bundleUrl: '${opts.base}/${opts.bundle}',
+    apiBase: '',
+    queryUrl: '${opts.queryUrl}'
   };
 </script>
 <script type="module" src="/artifacts/preview/preview.js"></script>
 </body>
 </html>`;
+}
+
+function previewHtml(buildId: string): string {
+  const m = JSON.parse(readFileSync(join(sandbox.buildDir(buildId), 'manifest.json'), 'utf8'));
+  return renderHtml({
+    title: `报告预览 · ${(m.name as string) ?? 'report'}`,
+    base: `/artifacts/sandbox/builds/${buildId}`,
+    schema: String(m.artifact.schema).replace(/^\.\//, ''),
+    bundle: String(m.artifact.bundle).replace(/^\.\//, ''),
+    queryUrl: '/api/daf/query',
+  });
+}
+
+/** 发布产物页面：指向冻结的 published/<id>/，数据查询走发布作用域端点（快照）。 */
+function publishedHtml(id: string): string {
+  const m = JSON.parse(readFileSync(join(PUBLISHED_DIR, id, 'manifest.json'), 'utf8'));
+  return renderHtml({
+    title: `${(m.name as string) ?? '报告'} · 已发布`,
+    base: `/artifacts/published/${id}`,
+    schema: String(m.artifact.schema).replace(/^\.\//, ''),
+    bundle: String(m.artifact.bundle).replace(/^\.\//, ''),
+    queryUrl: `/api/published/${id}/query`,
+  });
 }
 
 /** AI 搭建工作台（React 18 + Ant Design X，esbuild 产物；左对话右预览，标注直连同源预览 iframe）。 */
@@ -147,12 +171,62 @@ async function handleQuery(req: import('node:http').IncomingMessage, res: import
     return sendJson(res, 400, { error: 'invalid json' });
   }
   const datasetId = payload.datasetId ?? '';
-  if (!KNOWN_DATASETS.includes(datasetId)) {
+  if (!knownDatasetIds().includes(datasetId)) {
     return sendJson(res, 404, { error: `unknown datasetId: ${datasetId}` });
   }
-  await delay(100 + Math.floor(Math.random() * 200));
+  await delay(80 + Math.floor(Math.random() * 160));
   const rows = queryDataset(datasetId, payload.params ?? {});
   sendJson(res, 200, { rows, total: rows.length });
+}
+
+/** POST /api/datasets：上传 CSV/TSV（body=原始文本，?name= 文件名）→ 解析落盘 → 返回 meta。 */
+async function handleDatasetUpload(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, url: URL) {
+  const raw = await readBody(req);
+  if (!raw.trim()) return sendJson(res, 400, { error: '空文件' });
+  const name = url.searchParams.get('name') ?? 'dataset';
+  const title = url.searchParams.get('title') ?? name.replace(/\.[a-z]+$/i, '');
+  try {
+    let id = toDatasetId(name);
+    // id 冲突则追加序号
+    const existing = new Set(listDatasets().map((d) => d.id));
+    if (existing.has(id)) {
+      let n = 2;
+      while (existing.has(`${id}_${n}`)) n++;
+      id = `${id}_${n}`;
+    }
+    const meta = importDataset(raw, { id, title });
+    console.log(`  ✓ 数据集导入 ${id}（${meta.rowCount} 行 · ${meta.fields.length} 列）`);
+    sendJson(res, 200, meta);
+  } catch (e) {
+    sendJson(res, 400, { error: (e as Error).message });
+  }
+}
+
+/** POST /api/publish：冻结当前报告为可分享产物（bundle+schema+上传数据快照）。 */
+async function handlePublish(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+  let body: { title?: string };
+  try {
+    body = (await readJson(req)) ?? {};
+  } catch {
+    body = {};
+  }
+  try {
+    if (!sandbox.hasBuild(currentHead)) return sendJson(res, 400, { error: '当前报告尚未构建' });
+    const schema = sandbox.readSchema();
+    const title = body.title || (schema as { name?: string }).name || '未命名报告';
+    const rec = publishReport({
+      buildDir: sandbox.buildDir(currentHead),
+      publishedDir: PUBLISHED_DIR,
+      hash: currentHead,
+      schema,
+      title,
+      createdAt: Date.now(),
+    });
+    console.log(`  ✓ 报告发布 ${rec.id}（冻结数据集 ${rec.datasets.length} 个）`);
+    sendJson(res, 200, { ...rec, url: `/published/${rec.id}/` });
+  } catch (e) {
+    sendJson(res, 400, { error: (e as Error).message });
+  }
 }
 
 /** PUT /api/schema：可视编排/拖拽保存 = 写沙箱 + 零构建直更新 + commit。 */
@@ -323,6 +397,17 @@ const server = createServer((req, res) => {
   const m = req.method;
 
   if (m === 'POST' && path === '/api/daf/query') return void handleQuery(req, res);
+  if (m === 'GET' && path === '/api/datasets') return sendJson(res, 200, { datasets: listDatasets() });
+  if (m === 'POST' && path === '/api/datasets') return void handleDatasetUpload(req, res, url);
+  if (m === 'GET' && path.startsWith('/api/datasets/') && path.endsWith('/preview')) {
+    const id = decodeURIComponent(path.slice('/api/datasets/'.length, -'/preview'.length));
+    const p = previewDataset(id);
+    return p ? sendJson(res, 200, p) : sendJson(res, 404, { error: `未知数据集: ${id}` });
+  }
+  if (m === 'DELETE' && path.startsWith('/api/datasets/')) {
+    const id = decodeURIComponent(path.slice('/api/datasets/'.length));
+    return sendJson(res, 200, { ok: deleteDataset(id) });
+  }
   if (m === 'GET' && path === '/api/schema') return sendJson(res, 200, sandbox.readSchema());
   if (m === 'PUT' && path === '/api/schema') return void handleSchemaPut(req, res);
   if (m === 'POST' && path === '/api/agent/chat') return void handleAgentChat(req, res);
@@ -363,6 +448,27 @@ const server = createServer((req, res) => {
   }
   if (m === 'GET' && (path === '/chat' || path === '/chat/')) {
     return send(res, 200, chatHtml(), MIME['.html']);
+  }
+  // 发布
+  if (m === 'POST' && path === '/api/publish') return void handlePublish(req, res);
+  if (m === 'GET' && path === '/api/published') {
+    return sendJson(res, 200, { published: listPublished(PUBLISHED_DIR).map((r) => ({ ...r, url: `/published/${r.id}/` })) });
+  }
+  if (m === 'POST' && /^\/api\/published\/[^/]+\/query$/.test(path)) {
+    const id = path.split('/')[3];
+    return void (async () => {
+      let payload: { datasetId?: string; params?: Record<string, unknown> };
+      try { payload = JSON.parse((await readBody(req)) || '{}'); } catch { return sendJson(res, 400, { error: 'invalid json' }); }
+      await delay(60 + Math.floor(Math.random() * 120));
+      const rows = queryPublished(PUBLISHED_DIR, id, payload.datasetId ?? '', payload.params ?? {});
+      if (rows == null) return sendJson(res, 404, { error: `发布产物无此数据集快照: ${payload.datasetId}` });
+      sendJson(res, 200, { rows, total: rows.length });
+    })();
+  }
+  if (m === 'GET' && /^\/published\/[^/]+\/?$/.test(path)) {
+    const id = path.split('/')[2];
+    if (!existsSync(join(PUBLISHED_DIR, id, 'manifest.json'))) return send(res, 404, `发布产物不存在: ${id}`);
+    return send(res, 200, publishedHtml(id), MIME['.html']);
   }
   if (m === 'GET' && path === '/api/timeline') return handleTimeline(res);
   if (m === 'POST' && path === '/api/timeline/checkout') return void handleCheckout(req, res);

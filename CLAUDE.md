@@ -16,10 +16,13 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 
 - [x] **第 8 轮（用户指令：平台能力全面增强）**：① **物料库** 6→11：新增 AreaChart/FunnelChart/RadarChart（VChart）、GaugeChart（antd Progress dashboard，VChart gauge spec 不稳弃用）、SectionTitle；物料面板按 category 自动分组；meta↔kitExports 一致性测试。② **细粒度标注**：块内元素级选取（hover 双层高亮：实线元素+虚线所属块；点击=元素级选区含 selector/tag/text/九宫格 region，⌥点击=整块，Esc 退出并回同步状态 M_ON_MODE）；chip 显示「块 › 元素 "文本"」；llm-agent 选区上下文带元素定位并要求聚焦修改。③ **模型配置化**：/api/agent/llm-config GET/PUT（运行时持久化 .artifacts/llm-config.json，优先级高于 env，保存即生效）+ /api/agent/llm-test（GET /v1/models/{id} 零成本验证凭证+模型 id）；chat 设置弹窗（模型 id 自动补全/baseUrl/apiKey/测试连接）——配置 model id 即可真实对话。④ **商业级 UI**：chat 用 X 的 Welcome/Prompts 空态 + marked/DOMPurify markdown 渲染 + 渐变品牌/气泡精修/模型状态 pill；host 品牌顶栏（BrandingPlugin）+ theme.css 主题精修。65 单测通过（+3）。浏览器实测：组件库分组 11 物料、漏斗/雷达/仪表盘真实渲染、元素级 chip「DAU › span "16,240"」、设置弹窗测试连接拿到真实 authentication_error（链路只差有效 key）。
 
+- [x] **第 9 轮（用户指令：去 mock、全链路打通、商业生产级）**：① **真实数据层**（去 mock 核心）：`csv.ts` 零依赖 CSV/TSV 解析（引号/转义/换行/自动分隔符/类型推断）+ `datasets.ts` 数据集注册中心（内置示例 + 用户上传持久化 `.artifacts/datasets/`），统一 query 接口供 `/api/daf/query`、Agent、预览共用；`/api/datasets` CRUD；host **数据源面板**（上传 CSV→自动识别列类型/维度度量→预览/删除）。② **Agent 动态数据知识**：`query_dataset` enum/系统提示数据清单改为运行时派生（含上传数据集），Agent 可基于真实上传数据按真实字段搭建报告。③ **发布/导出**（全链路出口）：`publish.ts` 冻结当前 commit 的 bundle+schema + 所用上传数据集快照 → `/published/<id>/` 可分享页面，自带冻结数据端点 `/api/published/<id>/query`（含过滤），**源数据集删除/工程继续编辑都不影响已发布版本**；host 发布按钮 + 已发布列表（复制链接）。预览 harness 增 `queryUrl` 支持发布作用域取数。75 单测通过（+10）。浏览器全链路实测：上传真实 sales.csv→数据面板展示真实 6 行→基于 ds_sales 搭报告（堆叠柱状+明细表渲染真实数据）→发布得分享 URL→删除源数据集后发布页仍正常渲染。
+
 每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
 
 ## 已确认的实现决策（不要改）
 
+0. **去 mock 方向（2026-06-13 用户 /goal：商业生产级、全链路打通而非 mock）**：数据层已真实（CSV 上传→注册中心→统一查询，见第 9 轮）；Agent 已真实（配置 model id 即真模型，见第 6/8 轮）；构建已真实（esbuild）；发布已真实（自包含可分享产物）。仅剩 DAF 后端查询的"内置示例数据集"是确定性 mock（用户上传数据走真实路径）。后续新增能力一律真实可用，不做假实现。
 1. 沙箱构建用**真 esbuild**：mock-server 真改 template-report 源码、真增量构建出新 bundle（hash 寻址），不是假延时切 URL。
 2. 标注定位第一版**只做块级** `data-node-id`，源码级 `data-loc`（babel 注入）5 轮之后再说。
 3. 物料独立成包 `@daf-materials/kit`，模拟"CDN 共享依赖、不打进报告 bundle"语义。

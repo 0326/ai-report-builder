@@ -14,6 +14,8 @@ interface PreviewConfig {
   schemaUrl: string;
   bundleUrl: string;
   apiBase?: string;
+  /** 取数端点（发布产物指向冻结快照端点；缺省 `${apiBase}/api/daf/query`） */
+  queryUrl?: string;
 }
 
 declare global {
@@ -22,8 +24,8 @@ declare global {
   }
 }
 
-async function dafQuery(req: QueryRequest, apiBase: string) {
-  const res = await fetch(`${apiBase}/api/daf/query`, {
+async function dafQuery(req: QueryRequest, queryUrl: string) {
+  const res = await fetch(queryUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ datasetId: req.datasetId, fields: req.fields, params: req.params }),
@@ -41,6 +43,7 @@ async function main() {
     return;
   }
   const apiBase = cfg.apiBase ?? '';
+  const queryUrl = cfg.queryUrl ?? `${apiBase}/api/daf/query`;
   const designtime = new URLSearchParams(window.location.search).get('designtime') === '1';
 
   try {
@@ -60,7 +63,7 @@ async function main() {
       kernel = await createReportRuntime({
         schema,
         env: designtime ? 'design' : 'preview',
-        services: { dafQuery: (req) => dafQuery(req, apiBase) },
+        services: { dafQuery: (req) => dafQuery(req, queryUrl) },
         customHandlers: bundleMod.customHandlers,
       });
       const registry = buildRegistry(schema.componentsMap, { '@daf-materials/kit': kitExports });

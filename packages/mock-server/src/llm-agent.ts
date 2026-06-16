@@ -12,7 +12,7 @@ import type { ReportSchema } from '@daf/report-runtime/core';
 import { materialMetas } from '@daf-materials/kit/meta';
 import { streamMessage, type ContentBlock, type MessageParam, type ToolDef } from './claude.ts';
 import { getLlmConfig } from './env.ts';
-import { queryDataset, KNOWN_DATASETS } from './fixtures.ts';
+import { queryDataset, knownDatasetIds, datasetDoc } from './datasets.ts';
 import { validateSchema } from './schema-store.ts';
 import { schemaDiff, summarizeOps, codeDiff } from './diff.ts';
 import type { Sandbox } from './sandbox.ts';
@@ -46,14 +46,6 @@ export type Emit = (ev: AgentEvent) => void;
 
 /* ------------------------------ system prompt ------------------------------ */
 
-const DATASET_DOC = `可用数据集（type 一律 'daf-query'，datasetId 取下表；params 支持 JSExpression 绑定 this.state.*）：
-- metric_summary: 行 {dau,newUser,revenue}，单行汇总；params.region
-- metric_dau: 行 {date,dau}，近 7 天；params.region, params.channel
-- metric_channel: 行 {channel,uv}；params.region
-- metric_detail: 行 {date,channel,uv,dau}；params.region
-- metric_retention: 行 {stage,users}，留存漏斗 5 环节；params.region
-region 取值: all/app/web/mini；channel 取值: all/app/web/mini/other`;
-
 function materialsDoc(): string {
   const lines = materialMetas.map((m) => {
     const props = m.configurableProps.map((p) => `${p.name}:${p.type}`).join(', ');
@@ -78,9 +70,10 @@ Node: { "id":"node_xxx"(全局唯一), "componentName":物料名或"AIBlock", "p
 ${materialsDoc()}
 - AIBlock（自定义代码块）package "@daf/report-runtime"，props.entry="blocks/Xxx"，源码放 src/blocks/Xxx/index.tsx；图表类需求优先用公共物料（零构建），只有公共物料表达不了的逻辑才写 AIBlock。
 
-## 数据
-${DATASET_DOC}
-不确定数据形状时先 query_dataset 看样本。
+## 数据（type 一律 'daf-query'；params 支持 JSExpression 绑定 this.state.*；可过滤参数见各数据集）
+${datasetDoc()}
+内置示例的 region 取值 all/app/web/mini、channel 取值 all/app/web/mini/other。
+**优先使用用户上传的真实数据集**（标记【用户上传】），按其真实字段名搭建。不确定数据形状时先 query_dataset 看样本。
 
 ## 自定义块代码（AIBlock）铁律 —— 违反会被 lint 拦截
 - 取数唯一通道 runtime.data：const s = useSyncExternalStore((cb)=>runtime.data.watch('ds_x',cb), ()=>runtime.data.get('ds_x'))，s.rows 为行数组；dsId 必须 ∈ 该节点 x-consumes。严禁 fetch/XMLHttpRequest/WebSocket。
@@ -123,7 +116,7 @@ const TOOLS: ToolDef[] = [
     input_schema: {
       type: 'object',
       properties: {
-        datasetId: { type: 'string', enum: KNOWN_DATASETS },
+        datasetId: { type: 'string', description: '数据集 id（见系统提示数据清单，含用户上传的真实数据集）' },
         params: { type: 'object', description: '可选过滤参数，如 {"region":"app"}' },
       },
       required: ['datasetId'],
@@ -216,7 +209,11 @@ async function execTool(
       }
     }
     case 'query_dataset': {
-      const rows = queryDataset(String(input.datasetId ?? ''), (input.params as Record<string, unknown>) ?? {});
+      const dsId = String(input.datasetId ?? '');
+      if (!knownDatasetIds().includes(dsId)) {
+        return { ok: false, result: `未知数据集 ${dsId}；可用：${knownDatasetIds().join(', ')}` };
+      }
+      const rows = queryDataset(dsId, (input.params as Record<string, unknown>) ?? {});
       return { ok: true, result: JSON.stringify({ rows: rows.slice(0, 8), total: rows.length }) };
     }
     case 'stage_schema': {
