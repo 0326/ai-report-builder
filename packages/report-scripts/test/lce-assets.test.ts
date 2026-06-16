@@ -21,7 +21,11 @@ test('deriveLceAssets: packages + componentMeta + setters 映射', () => {
   const pie = assets.components.find((c) => c.componentName === 'PieChart') as Record<string, never>;
   const pieProps = pie.props as Array<{ name: string; setter: unknown }>;
   assert.equal(pieProps.find((p) => p.name === 'donut')?.setter, 'BoolSetter');
-  assert.ok(pieProps.find((p) => p.name === 'data'), 'dataProp 生成 setter');
+  // 数据绑定走 DataBindSetter（plain `dataset` prop），真实 data prop 不在面板暴露
+  const bind = pieProps.find((p) => p.name === 'dataset')?.setter as { componentName?: string } | undefined;
+  assert.equal(bind?.componentName, 'DataBindSetter', '数据绑定 setter');
+  assert.ok(!pieProps.find((p) => p.name === 'data'), 'data prop 不暴露');
+  assert.ok(!pieProps.find((p) => p.name === 'categoryField'), '字段映射折进数据绑定');
   const npm = pie.npm as { package: string; destructuring: boolean };
   assert.equal(npm.package, '@daf-materials/kit');
   assert.equal(npm.destructuring, true);

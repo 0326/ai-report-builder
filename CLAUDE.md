@@ -18,6 +18,8 @@ AI-Native 智能报告搭建系统（搭建态 + 运行态）的可运行实现�
 
 - [x] **第 9 轮（用户指令：去 mock、全链路打通、商业生产级）**：① **真实数据层**（去 mock 核心）：`csv.ts` 零依赖 CSV/TSV 解析（引号/转义/换行/自动分隔符/类型推断）+ `datasets.ts` 数据集注册中心（内置示例 + 用户上传持久化 `.artifacts/datasets/`），统一 query 接口供 `/api/daf/query`、Agent、预览共用；`/api/datasets` CRUD；host **数据源面板**（上传 CSV→自动识别列类型/维度度量→预览/删除）。② **Agent 动态数据知识**：`query_dataset` enum/系统提示数据清单改为运行时派生（含上传数据集），Agent 可基于真实上传数据按真实字段搭建报告。③ **发布/导出**（全链路出口）：`publish.ts` 冻结当前 commit 的 bundle+schema + 所用上传数据集快照 → `/published/<id>/` 可分享页面，自带冻结数据端点 `/api/published/<id>/query`（含过滤），**源数据集删除/工程继续编辑都不影响已发布版本**；host 发布按钮 + 已发布列表（复制链接）。预览 harness 增 `queryUrl` 支持发布作用域取数。75 单测通过（+10）。浏览器全链路实测：上传真实 sales.csv→数据面板展示真实 6 行→基于 ds_sales 搭报告（堆叠柱状+明细表渲染真实数据）→发布得分享 URL→删除源数据集后发布页仍正常渲染。
 
+- [x] **第 10 轮（可视数据绑定，补全可视编排链路）**：拖物料后可纯可视绑定真实数据（无需 AI/代码/JSON）。`DataBindSetter`（host class 组件，LCE 以 new 实例化故不用 hooks）：选数据集下拉（含上传数据集）+ 字段映射下拉（数据集真实列填充），选数据集时**自动按 维度→类目字段、度量→数值字段** 智能映射。避开 LCE 变量绑定模式的设计：setter 写 plain `props.dataset`=数据集 id，服务端 `normalize.ts` 在 PUT 保存时归一化成 `props.data` JSExpression + 自动补 `x-consumes` + `Page.dataSource.list`（known 校验防脏写、只增不减幂等）；lce-assets 数据绑定 prop 用 DataBindSetter 并把字段映射 prop 折入、不暴露裸 data。81 单测通过（+6）。浏览器实测：空 BarChart→选「季度销售·上传」→自动映射 month/revenue→保存（归一化落 data/dataSource/x-consumes）→预览渲染真实营收柱状图，全程零代码。
+
 每轮完成且验收通过后：`git commit`（结构化 message，见下）并 `git push`，再开始下一轮。
 
 ## 已确认的实现决策（不要改）

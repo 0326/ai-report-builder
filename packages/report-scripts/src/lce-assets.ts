@@ -38,19 +38,31 @@ function setterOf(p: MaterialMeta['configurableProps'][number]): unknown {
 }
 
 function componentMetaOf(m: MaterialMeta): Record<string, unknown> {
+  // 字段映射 prop（xField/yField/categoryField/valueField/seriesField/field）折进数据绑定 setter
+  const isFieldMap = (name: string) => /field$/i.test(name) || name === 'field';
+  const fieldMapProps = m.dataProp ? m.configurableProps.filter((p) => isFieldMap(p.name)) : [];
+  const fieldMapNames = new Set(fieldMapProps.map((p) => p.name));
+
   const props: LceSetterProp[] = [
-    ...m.configurableProps.map((p) => ({
-      name: p.name,
-      title: p.title,
-      setter: setterOf(p),
-      defaultValue: m.defaultProps[p.name],
-    })),
-    // 数据绑定 prop：变量绑定（JSExpression → dataSourceMap）
+    // 数据绑定：DataBindSetter 写 plain `dataset` prop（避开 LCE 变量绑定模式），
+    // 保存时服务端归一化成 dataProp 的 JSExpression。真实 data prop 不在面板暴露。
     ...(m.dataProp ? [{
-      name: m.dataProp,
-      title: '数据',
-      setter: { componentName: 'JsonSetter' },
+      name: 'dataset',
+      title: '数据绑定',
+      setter: {
+        componentName: 'DataBindSetter',
+        props: { fieldProps: fieldMapProps.map((p) => ({ name: p.name, title: p.title })) },
+      },
     }] : []),
+    // 其余可配置 props（排除字段映射 prop 与真实 data prop —— 均由数据绑定接管）
+    ...m.configurableProps
+      .filter((p) => !fieldMapNames.has(p.name) && p.name !== m.dataProp)
+      .map((p) => ({
+        name: p.name,
+        title: p.title,
+        setter: setterOf(p),
+        defaultValue: m.defaultProps[p.name],
+      })),
   ];
 
   return {

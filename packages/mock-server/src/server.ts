@@ -24,6 +24,7 @@ import {
 } from './datasets.ts';
 import { toDatasetId } from './csv.ts';
 import { publishReport, listPublished, queryPublished } from './publish.ts';
+import { normalizeDataBindings } from './normalize.ts';
 import { validateSchema } from './schema-store.ts';
 import { Sandbox } from './sandbox.ts';
 import { seedFiles } from './agent-scripts.ts';
@@ -234,6 +235,10 @@ async function handleSchemaPut(req: import('node:http').IncomingMessage, res: im
   let schema: ReportSchema;
   try {
     schema = await readJson<ReportSchema>(req);
+    // 可视编排数据绑定归一化：从 data JSExpression 反推 x-consumes + 自动补 dataSource
+    const norm = normalizeDataBindings(schema, knownDatasetIds());
+    schema = norm.schema;
+    if (norm.addedDataSources.length) console.log(`  ↳ 自动补数据源 ${norm.addedDataSources.join(', ')}`);
     validateSchema(schema);
   } catch (e) {
     return sendJson(res, 400, { error: (e as Error).message });
